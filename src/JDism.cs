@@ -1,6 +1,23 @@
-﻿using System.Text;
+﻿using System.Reflection;
+using System.Runtime;
+using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace JDism;
+
+public enum MethodReferenceKind : byte
+{
+	None = 0,
+	GetField,
+	GetStatic,
+	PutField,
+	PutStatic,
+	InvokeVirtual,
+	InvokeStatic,
+	InvokeSpecial,
+	NewInvokeSpecial,
+	InvokeInterface
+}
 
 public enum JTypeType
 {
@@ -16,6 +33,88 @@ public enum JTypeType
 	Short = 'S',
 	Boolean = 'Z',
 	Method,
+}
+
+public enum AttributeType : ushort
+{
+	None = 0,
+	ConstantValue,
+	Code,
+	StackMapTable,
+	Exceptions,
+	BootstrapMethods,
+	InnerClasses,
+	EnclosingMethod,
+	Synthetic,
+	Signature,
+	RuntimeVisibleAnnotations,
+	RuntimeInvisibleAnnotations,
+	RuntimeVisibleParameterAnnotations,
+	RuntimeInvisibleParameterAnnotations,
+	RuntimeVisibleTypeAnnotations,
+	RuntimeInvisibleTypeAnnotations,
+	AnnotationDefault,
+	MethodParameters,
+	SourceFile,
+	SourceDebugExtension,
+	LineNumberTable,
+	LocalVariableTable,
+	LocalVariableTypeTable,
+	Deprecated,
+	UserDefined = 0xffff,
+}
+
+[Flags]
+public enum MethodAccessFlags
+{
+	None = 0,
+	Public = 0x0001,
+	Private = 0x0002,
+	Protected = 0x0004,
+	Static = 0x0008,
+	Final = 0x0010,
+	Synchronized = 0x0020,
+	Bridge = 0x0040,
+	VarArgs = 0x0080,
+	Native = 0x0100,
+	Abstract = 0x0400,
+	Strict = 0x0800,
+	Synthetic = 0x1000,
+}
+
+[Flags]
+public enum FieldAccessFlags
+{
+	None = 0,
+	Public = 0x0001,
+	Private = 0x0002,
+	Protected = 0x0004,
+	Static = 0x0008,
+	Final = 0x0010,
+
+	Volatile = 0x0040,
+	Transient = 0x0080,
+
+	Synthetic = 0x1000,
+	Enum = 0x4000,
+}
+
+[Flags]
+public enum ClassAccessFlags
+{
+	None = 0,
+	Public = 0x0001,
+
+
+	Final = 0x0010,
+	Super = 0x0020,
+
+	Interface = 0x0200,
+	Abstract = 0x0400,
+
+	Synthetic = 0x1000,
+	Annotation = 0x2000,
+	Enum = 0x4000,
 }
 
 public class JType
@@ -201,6 +300,7 @@ public enum ConstantType
 	InvokeDynamic,
 	//Module,
 	//Package
+
 }
 
 
@@ -221,7 +321,7 @@ public class Constant
 	public ushort NameTypeIndex { get => index2; set => index2 = value; }
 	public ushort NameIndex { get => index1; set => index1 = value; }
 	public ushort DescriptorIndex { get => index2; set => index2 = value; }
-	public byte ReferenceKind { get => (byte)index1; set => index1 = value; }
+	public MethodReferenceKind ReferenceKind { get => (MethodReferenceKind)index1; set => index1 = (ushort)value; }
 	public ushort ReferenceIndex { get => index2; set => index2 = value; }
 
 	public ushort BootstrapMethodAttrIndex { get => index1; set => index1 = value; }
@@ -232,41 +332,62 @@ public class Constant
 	private ushort index2;
 	private long long_int;
 	private double double_float;
+
+	public bool IsDoubleSlotted()
+	{
+		return type == ConstantType.Double || type == ConstantType.Long;
+	}
+
 }
 
-public class Attribute
+public struct Attribute
 {
+	public AttributeType Type;
+	public string Name;
 	public ushort NameIndex;
+
+	// for custom defined attributes
 	public byte[]? _data;
 }
 
 public class Field
 {
-	public ushort AccessFlags;
+	public FieldAccessFlags AccessFlags;
 	public ushort NameIndex;
 	public ushort DescriptorIndex;
 	public Attribute[]? Attributes;
 }
 public class Method
 {
-	public ushort AccessFlags;
+	public MethodAccessFlags AccessFlags;
 	public ushort NameIndex;
 	public ushort DescriptorIndex;
 	public Attribute[]? Attributes;
+}
+
+public struct ConstantError(ushort index, string msg = "")
+{
+	public ushort Index = index;
+	public string Message = msg;
 }
 
 public class Disassembly
 {
 	public ushort VersionMinor;
 	public ushort VersionMajor;
-	public Constant[]? Constants;
-	public ushort AccessFlags;
+	public Constant[] Constants;
+	public ClassAccessFlags AccessFlags;
 	public ushort ThisClass;
 	public ushort SuperClass;
 	public ushort[]? Interfaces;
 	public Field[]? Fields;
 	public Method[]? Methods;
 	public Attribute[]? Attributes;
+
+	public Disassembly()
+	{
+		Constants = new Constant[0];
+	}
 
 	// constant index X (X for the class file) is Constant[ConstantIndexRoutingTable[X]]
 	public ushort[]? ConstantIndexRoutingTable;
@@ -311,6 +432,11 @@ public class Disassembly
 
 	public void BuildCIRT()
 	{
+		if (Constants is null)
+		{
+			return;
+		}
+
 		ConstantIndexRoutingTable = new ushort[Constants.Length + 1];
 		int offset = 1;
 		for (int i = 0; i < ConstantIndexRoutingTable.Length; i++)
@@ -320,6 +446,242 @@ public class Disassembly
 			//{
 			//	offset++;
 			//}
+		}
+	}
+
+	public ConstantError[] ValidateConstantTable()
+	{
+		if (Constants is null)
+			return Array.Empty<ConstantError>();
+		List<ConstantError> errors = new(2 + (Constants.Length >> 3));
+		ushort len = (ushort)Constants.Length;
+
+		for (ushort i = 0; i < len; i++)
+		{
+			Constant constant = Constants[i];
+
+			if (constant is null)
+			{
+				errors.Add(new(i, "Null constant"));
+				continue;
+			}
+
+			switch (constant.type)
+			{
+				case ConstantType.Class:
+				{
+					if (!IsConstantOfType(constant.NameIndex, ConstantType.String))
+					{
+						errors.Add(new(i, $"Constant Index {constant.NameIndex} should be a valid index to a string constant"));
+					}
+					break;
+				}
+				case ConstantType.FieldReference:
+				case ConstantType.MethodReference:
+				case ConstantType.InterfaceMethodReference:
+				{
+					if (!IsConstantOfType(constant.ClassIndex, ConstantType.Class))
+					{
+						errors.Add(new(i, $"Constant Index {constant.ClassIndex} should be a valid index to a class constant"));
+					}
+
+					if (!IsConstantOfType(constant.NameTypeIndex, ConstantType.NameTypeDescriptor))
+					{
+						errors.Add(new(i, $"Constant Index {constant.NameTypeIndex} should be a valid index to a name type descriptor constant"));
+					}
+
+					break;
+				}
+				case ConstantType.StringReference:
+				{
+					if (!IsConstantOfType(constant.StringIndex, ConstantType.String))
+					{
+						errors.Add(new(i, $"Constant Index {constant.StringIndex} should be a valid index to a string constant"));
+					}
+
+					break;
+				}
+				case ConstantType.NameTypeDescriptor:
+				{
+					if (!IsConstantOfType(constant.NameIndex, ConstantType.String))
+					{
+						errors.Add(new(i, $"Constant Index {constant.NameIndex} should be a valid index to a string constant (name index)"));
+					}
+
+					if (!IsConstantOfType(constant.NameIndex, ConstantType.String))
+					{
+						errors.Add(new(i, $"Constant Index {constant.NameIndex} should be a valid index to a string constant (descriptor index)"));
+					}
+
+					break;
+				}
+				case ConstantType.MethodHandle:
+				{
+					switch (constant.ReferenceKind)
+					{
+						case MethodReferenceKind.GetField:
+						case MethodReferenceKind.GetStatic:
+						case MethodReferenceKind.PutField:
+						case MethodReferenceKind.PutStatic:
+						{
+							if (!IsConstantOfType(constant.ReferenceIndex, ConstantType.FieldReference))
+							{
+								errors.Add(new(i, $"Constant Index {constant.ReferenceIndex} should be a valid index to a field reference constant"));
+							}
+							break;
+						}
+						case MethodReferenceKind.InvokeVirtual:
+						case MethodReferenceKind.NewInvokeSpecial:
+						{
+							if (!IsConstantOfType(constant.ReferenceIndex, ConstantType.MethodReference))
+							{
+								errors.Add(new(i, $"Constant Index {constant.ReferenceIndex} should be a valid index to a method reference constant"));
+							}
+							else if (constant.ReferenceKind != MethodReferenceKind.NewInvokeSpecial)
+							{
+								// TODO: CHECK FOR VALID METHOD NAME
+							}
+							else
+							{
+								// TODO: CHECK FOR VALID NEW METHOD NAME
+							}
+
+							break;
+						}
+						case MethodReferenceKind.InvokeStatic:
+						case MethodReferenceKind.InvokeSpecial:
+						{
+							bool ref_index_valid_55 = IsConstantOfType(constant.ReferenceIndex, ConstantType.MethodReference);
+							if (VersionMajor >= 56)
+							{
+								if (!(ref_index_valid_55 || IsConstantOfType(constant.ReferenceIndex, ConstantType.InterfaceMethodReference)))
+								{
+									errors.Add(new(i, $"Constant Index {constant.ReferenceIndex} should be a valid index to a method reference or an interface method reference constant (v56)"));
+								}
+								else
+								{
+									// TODO: CHECK FOR VALID METHOD NAME
+								}
+
+								break;
+							}
+
+							if (!ref_index_valid_55)
+							{
+								errors.Add(new(i, $"Constant Index {constant.ReferenceIndex} should be a valid index to a method reference constant (pre v55)"));
+							}
+							else
+							{
+								// TODO: CHECK FOR VALID METHOD NAME
+							}
+
+							break;
+						}
+						case MethodReferenceKind.InvokeInterface:
+						{
+							if (!IsConstantOfType(constant.ReferenceIndex, ConstantType.InterfaceMethodReference))
+							{
+								errors.Add(new(i, $"Constant Index {constant.ReferenceIndex} should be a valid index to an interface method reference constant"));
+							}
+							else
+							{
+								// TODO: CHECK FOR VALID METHOD NAME
+							}
+
+							break;
+						}
+					}
+
+					break;
+				}
+				case ConstantType.MethodType:
+				{
+					if (!IsConstantOfType(constant.DescriptorIndex, ConstantType.String))
+					{
+						errors.Add(new(i, $"Constant Index {constant.DescriptorIndex} should be a valid index to a string constant (method type)"));
+					}
+
+					break;
+				}
+				case ConstantType.InvokeDynamic:
+				{
+					// TODO: CHECK FOR THE BOOTSTRAP METHOD BETWEEN THE BOOTSTRAP METHODS OF THIS CLASS
+
+					if (!IsConstantOfType(constant.NameTypeIndex, ConstantType.NameTypeDescriptor))
+					{
+						errors.Add(new(i, $"Constant Index {constant.NameTypeIndex} should be a valid index to a name type descriptor constant (method type)"));
+					}
+
+					break;
+				}
+				case ConstantType.String:
+				case ConstantType.Integer:
+				case ConstantType.Long:
+				case ConstantType.Float:
+				case ConstantType.Double:
+				{
+					// might check for strings later
+					// nothing to do here
+					break;
+				}
+				default:
+				{
+					errors.Add(new(i, $"Invalid constant type {(int)constant.type}"));
+					break;
+				}
+			}
+
+			if (constant.IsDoubleSlotted())
+				i++;
+
+		}
+
+		return errors.ToArray();
+	}
+
+	private bool IsConstantOfType(ushort index, ConstantType type)
+	{
+		// the class constant table indices start at 1
+		index--;
+		if (index >= Constants.Length)
+			return false;
+		return Constants[index].type == type;
+	}
+
+	private bool IsValidNonNewInvoke(string name)
+	{
+		return name != "<init>" && name != "<clinit>";
+	}
+
+	private void LoadAttributes(Attribute[] attrs)
+	{
+		for (int i = 0; i < attrs.Length; i++)
+		{
+			// TODO: check the name index
+			attrs[i].Name = Constants[attrs[i].NameIndex - 1].String;
+		}
+	}
+
+	public void SetupAttributes()
+	{
+		if (Fields is not null)
+		{
+			foreach (Field field in Fields)
+			{
+				if (field.Attributes is null)
+					continue;
+				LoadAttributes(field.Attributes);
+			}
+		}
+
+		if (Methods is not null)
+		{
+			foreach (Method method in Methods)
+			{
+				if (method.Attributes is null)
+					continue;
+				LoadAttributes(method.Attributes);
+			}
 		}
 	}
 
@@ -452,7 +814,7 @@ static public class JDisassembler
 				}
 				case ConstantType.MethodHandle:
 				{
-					constant.ReferenceKind = Read();
+					constant.ReferenceKind = (MethodReferenceKind)Read();
 					constant.ReferenceIndex = ReadU16BE();
 					Console.WriteLine($"READ CONSTANT MHANDLE: REFKIND={constant.ReferenceKind} REFINDEX={constant.ReferenceIndex}");
 					break;
@@ -495,7 +857,7 @@ static public class JDisassembler
 		{
 			Field field = new()
 			{
-				AccessFlags = ReadU16BE(),
+				AccessFlags = (FieldAccessFlags)ReadU16BE(),
 				NameIndex = ReadU16BE(),
 				DescriptorIndex = ReadU16BE()
 			};
@@ -514,7 +876,7 @@ static public class JDisassembler
 		{
 			Method method = new()
 			{
-				AccessFlags = ReadU16BE(),
+				AccessFlags = (MethodAccessFlags)ReadU16BE(),
 				NameIndex = ReadU16BE(),
 				DescriptorIndex = ReadU16BE()
 			};
@@ -555,9 +917,9 @@ static public class JDisassembler
 		disassembly.VersionMinor = reader.ReadU16BE();
 		disassembly.VersionMajor = reader.ReadU16BE();
 
-		disassembly.Constants = new Constant[reader.ReadU16BE()];
+		disassembly.Constants = new Constant[reader.ReadU16BE() - 1];
 
-		for (uint i = 0; i < disassembly.Constants.Length - 1; i++)
+		for (uint i = 0; i < disassembly.Constants.Length; i++)
 		{
 			Console.Write($"READING CONST[{i + 1}] ");
 			Constant constant = reader.ReadConstant();
@@ -592,7 +954,16 @@ static public class JDisassembler
 
 		disassembly.BuildCIRT();
 
-		disassembly.AccessFlags = reader.ReadU16BE();
+#if DEBUG
+		ConstantError[] errors = disassembly.ValidateConstantTable();
+
+		for (uint i = 0; i < errors.Length; i++)
+		{
+			Console.WriteLine($"Error On Constant {errors[i].Index}: {errors[i].Message}");
+		}
+#endif
+
+		disassembly.AccessFlags = (ClassAccessFlags)reader.ReadU16BE();
 		disassembly.ThisClass = reader.ReadU16BE();
 		disassembly.SuperClass = reader.ReadU16BE();
 		Console.WriteLine($"Class name: {disassembly.Constants[disassembly.ThisClass - 1].String} : {disassembly.Constants[disassembly.SuperClass - 1].String}");
@@ -621,12 +992,16 @@ static public class JDisassembler
 			disassembly.Methods[i] = reader.ReadMethod();
 		}
 
+		disassembly.SetupAttributes();
 
 		disassembly.Attributes = new Attribute[reader.ReadU16BE()];
 
 		for (uint i = 0; i < disassembly.Attributes.Length; i++)
 		{
-			disassembly.Attributes[i] = reader.ReadAttribute();
+			Attribute attr = reader.ReadAttribute();
+			attr.Name = disassembly.Constants[attr.NameIndex - 1].String;
+			disassembly.Attributes[i] = attr;
+			Console.WriteLine($"attribute \"{attr.Name}\": {attr._data.Length} bytes");
 		}
 
 		return string.Empty;
