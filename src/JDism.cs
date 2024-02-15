@@ -157,6 +157,8 @@ public class JType
 					parameters.Add(type);
 				}
 
+				MethodParameters = parameters.ToArray();
+
 				break;
 			}
 			default:
