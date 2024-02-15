@@ -46,13 +46,15 @@ static public class JDisassembler
 		Method,
 	}
 
-	public struct JType
+	public class JType
 	{
 		JTypeType Type;
-		uint ArrayDimension = 0;
+		ushort ArrayDimension = 0;
 		string ObjectType = "";
-		// last parameter is the return type
 		JType[]? MethodParameters;
+		JType? ReturnType;
+
+		public uint ReadLength { get; init; };
 
 		public JType()
 		{
@@ -61,16 +63,143 @@ static public class JDisassembler
 
 		public JType(string encoded_type)
 		{
+			if (encoded_type == "") return;
+
+			int strlen = encoded_type.Length;
+
+			// check for arrays
+			ArrayDimension = 0;
+			for (int i = 0; i < strlen; i++)
+			{
+				if (encoded_type[i] != '[')
+					break;
+				ArrayDimension++;
+			}
+
+			// removed prefixed array decorator "[[["
+			encoded_type = encoded_type.Substring(ArrayDimension);
+
+			ReadLength = ArrayDimension + 1U;
+
+			switch (encoded_type[0])
+			{
+				case 'B':
+				{
+					Type = JTypeType.Byte;
+					return;
+				}
+				case 'C':
+				{
+					Type = JTypeType.Char;
+					return;
+				}
+				case 'D':
+				{
+					Type = JTypeType.Double;
+					return;
+				}
+				case 'F':
+				{
+					Type = JTypeType.Float;
+					return;
+				}
+				case 'I':
+				{
+					Type = JTypeType.Int;
+					return;
+				}
+				case 'J':
+				{
+					Type = JTypeType.Long;
+					return;
+				}
+				case 'S':
+				{
+					Type = JTypeType.Short;
+					return;
+				}
+				case 'Z':
+				{
+					Type = JTypeType.Boolean;
+					return;
+				}
+				// TYPE
+				case 'L':
+				{
+					Type = JTypeType.Object;
+
+					int semicolon_pos = encoded_type.IndexOf(';');
+					if (semicolon_pos == -1)
+					{
+						throw new InvalidDataException($"Object Type Does Not have The Terminating Semicolon: \"{encoded_type}\"");
+					}
+
+					ObjectType = encoded_type.Substring(1, semicolon_pos);
+
+					// The prefixed 'L' and array decorators are handled before the switch
+					ReadLength += (uint)ObjectType.Length + 1U;
+
+					return;
+				}
+				// method
+				case '(':
+				{
+					int end_para = encoded_type.IndexOf(')', 1);
+					if (end_para == -1)
+					{
+						throw new InvalidDataException($"Ill-Formed Method JType: \"{encoded_type}\"");
+					}
+
+
+					string parameters_typing = encoded_type.Substring(1, end_para);
+					string return_type = encoded_type.Substring(end_para + 1);
+
+					// the return_type read length might vary for it's just the rest of the string
+					// and in need for parsing
+					ReadLength += (uint)parameters_typing.Length + 2U;
+					
+					try
+					{
+						ReturnType = new JType(return_type);
+					}
+					catch (Exception)
+					{
+						Console.WriteLine("Error While Parsing Return Type For Method JType:" );
+						Console.WriteLine($"Encoded type: \"{encoded_type}\"");
+						Console.WriteLine($"Return type: \"{return_type}\"");
+						throw;
+					}
+
+					ReadLength += ReturnType.ReadLength;
+
+					List<JType> parameters = new(8);
+
+					for (uint i = 0U; i < parameters_typing.Length; i++)
+					{
+						// TODO: CATCH EXCEPTIONS FOR MORE DETAILS
+						JType type = new(parameters_typing.Substring((int)i));
+
+						i += type.ReadLength;
+
+						parameters.Add(type);
+					}
+
+					break;
+				}
+				default:
+				{
+					throw new InvalidDataException($"Invalid Encoding For JType: \"{encoded_type}\"");
+				}
+			}
 
 		}
 
-		public JType(JTypeType type, uint arr_d, string obj_type)
+		public JType(JTypeType type, ushort arr_d, string obj_type)
 		{
 			Type = type;
 			ArrayDimension = arr_d;
 			ObjectType = obj_type;
 		}
-
 
 
 	}
@@ -253,90 +382,90 @@ static public class JDisassembler
 			switch (constant.type)
 			{
 				case ConstantType.String:
+				{
+					ushort len = ReadU16BE();
+					byte[] bytes = new byte[len];
+					if (Reader.Read(bytes, 0, len) < len)
 					{
-						ushort len = ReadU16BE();
-						byte[] bytes = new byte[len];
-						if (Reader.Read(bytes, 0, len) < len)
-						{
-							//! NOT ENOUGH BYTES
-						}
+						//! NOT ENOUGH BYTES
+					}
 
-						constant.String = Encoding.UTF8.GetString(bytes);
-						Console.WriteLine($"READ CONSTANT UTF8: \"{constant.String}\"");
-						break;
-					}
+					constant.String = Encoding.UTF8.GetString(bytes);
+					Console.WriteLine($"READ CONSTANT UTF8: \"{constant.String}\"");
+					break;
+				}
 				case ConstantType.Integer:
-					{
-						constant.IntegerValue = (int)ReadU32BE();
-						Console.WriteLine($"READ CONSTANT INT: {constant.IntegerValue}");
-						break;
-					}
+				{
+					constant.IntegerValue = (int)ReadU32BE();
+					Console.WriteLine($"READ CONSTANT INT: {constant.IntegerValue}");
+					break;
+				}
 				case ConstantType.Float:
-					{
-						constant.LongValue = (int)ReadIEEE754();
-						Console.WriteLine($"READ CONSTANT LONG: {constant.LongValue}");
-						break;
-					}
+				{
+					constant.LongValue = (int)ReadIEEE754();
+					Console.WriteLine($"READ CONSTANT LONG: {constant.LongValue}");
+					break;
+				}
 				case ConstantType.Long:
-					{
-						constant.FloatValue = (int)ReadU64BE();
-						Console.WriteLine($"READ CONSTANT FLOAT: {constant.FloatValue}");
-						break;
-					}
+				{
+					constant.FloatValue = (int)ReadU64BE();
+					Console.WriteLine($"READ CONSTANT FLOAT: {constant.FloatValue}");
+					break;
+				}
 				case ConstantType.Double:
-					{
-						constant.DoubleValue = (int)ReadDoubleIEEE754();
-						Console.WriteLine($"READ CONSTANT DOUBLE: {constant.DoubleValue}");
-						break;
-					}
+				{
+					constant.DoubleValue = (int)ReadDoubleIEEE754();
+					Console.WriteLine($"READ CONSTANT DOUBLE: {constant.DoubleValue}");
+					break;
+				}
 				case ConstantType.Class:
-					{
-						constant.NameIndex = ReadU16BE();
-						Console.WriteLine($"READ CONSTANT CLASS: NAME_INDEX={constant.NameIndex}");
-						break;
-					}
+				{
+					constant.NameIndex = ReadU16BE();
+					Console.WriteLine($"READ CONSTANT CLASS: NAME_INDEX={constant.NameIndex}");
+					break;
+				}
 				case ConstantType.FieldReference:
 				case ConstantType.MethodReference:
 				case ConstantType.InterfaceMethodReference:
-					{
-						constant.ClassIndex = ReadU16BE();
-						constant.NameTypeIndex = ReadU16BE();
-						Console.WriteLine($"READ CONSTANT F/M/IM-REF: CLASS_INDEX={constant.ClassIndex} NAMETYPE={constant.NameTypeIndex}");
-						break;
-					}
+				{
+					constant.ClassIndex = ReadU16BE();
+					constant.NameTypeIndex = ReadU16BE();
+					Console.WriteLine($"READ CONSTANT F/M/IM-REF: CLASS_INDEX={constant.ClassIndex} NAMETYPE={constant.NameTypeIndex}");
+					break;
+				}
 				case ConstantType.StringReference:
-					{
-						constant.StringIndex = ReadU16BE();
-						Console.WriteLine($"READ CONSTANT STRING-REF: STRING_INDEX={constant.StringIndex}");
-						break;
-					}
+				{
+					constant.StringIndex = ReadU16BE();
+					Console.WriteLine($"READ CONSTANT STRING-REF: STRING_INDEX={constant.StringIndex}");
+					break;
+				}
 				case ConstantType.NameTypeDescriptor:
-					{
-						constant.NameIndex = ReadU16BE();
-						constant.DescriptorIndex = ReadU16BE();
-						Console.WriteLine($"READ CONSTANT NAMETYPE-DESC: NAMEINDEX={constant.NameIndex} DESCINDEX={constant.DescriptorIndex}");
-						break;
-					}
+				{
+					constant.NameIndex = ReadU16BE();
+					constant.DescriptorIndex = ReadU16BE();
+					Console.WriteLine($"READ CONSTANT NAMETYPE-DESC: NAMEINDEX={constant.NameIndex} DESCINDEX={constant.DescriptorIndex}");
+					break;
+				}
 				case ConstantType.MethodHandle:
-					{
-						constant.ReferenceKind = Read();
-						constant.ReferenceIndex = ReadU16BE();
-						Console.WriteLine($"READ CONSTANT MHANDLE: REFKIND={constant.ReferenceKind} REFINDEX={constant.ReferenceIndex}");
-						break;
-					}
+				{
+					constant.ReferenceKind = Read();
+					constant.ReferenceIndex = ReadU16BE();
+					Console.WriteLine($"READ CONSTANT MHANDLE: REFKIND={constant.ReferenceKind} REFINDEX={constant.ReferenceIndex}");
+					break;
+				}
 				case ConstantType.MethodType:
-					{
-						constant.DescriptorIndex = ReadU16BE();
-						Console.WriteLine($"READ CONSTANT MTYPE: DESCINDEX={constant.DescriptorIndex}");
-						break;
-					}
+				{
+					constant.DescriptorIndex = ReadU16BE();
+					Console.WriteLine($"READ CONSTANT MTYPE: DESCINDEX={constant.DescriptorIndex}");
+					break;
+				}
 				case ConstantType.InvokeDynamic:
-					{
-						constant.BootstrapMethodAttrIndex = ReadU16BE();
-						constant.NameTypeIndex = ReadU16BE();
-						Console.WriteLine($"READ CONSTANT INVOKEDYN: BMAI={constant.BootstrapMethodAttrIndex} NAMETYPE={constant.NameTypeIndex}");
-						break;
-					}
+				{
+					constant.BootstrapMethodAttrIndex = ReadU16BE();
+					constant.NameTypeIndex = ReadU16BE();
+					Console.WriteLine($"READ CONSTANT INVOKEDYN: BMAI={constant.BootstrapMethodAttrIndex} NAMETYPE={constant.NameTypeIndex}");
+					break;
+				}
 			}
 
 			return constant;
@@ -441,17 +570,17 @@ static public class JDisassembler
 				case ConstantType.MethodReference:
 				case ConstantType.InterfaceMethodReference:
 				case ConstantType.StringReference:
-					{
-						constant.String = disassembly.Constants[constant.NameIndex - 1].String;
-						Console.WriteLine($"CONSTANT STRING: \"{constant.String}\"");
-						break;
-					}
+				{
+					constant.String = disassembly.Constants[constant.NameIndex - 1].String;
+					Console.WriteLine($"CONSTANT STRING: \"{constant.String}\"");
+					break;
+				}
 				case ConstantType.NameTypeDescriptor:
-					{
-						constant.String = $"{disassembly.Constants[constant.DescriptorIndex - 1].String} {disassembly.Constants[constant.NameIndex - 1].String}";
-						Console.WriteLine($"CONSTANT STRING: \"{constant.String}\"");
-						break;
-					}
+				{
+					constant.String = $"{disassembly.Constants[constant.DescriptorIndex - 1].String} {disassembly.Constants[constant.NameIndex - 1].String}";
+					Console.WriteLine($"CONSTANT STRING: \"{constant.String}\"");
+					break;
+				}
 				default: break;
 			}
 
