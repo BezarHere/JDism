@@ -5,324 +5,329 @@ using System.Text.Unicode;
 
 namespace JDism;
 
-static public class JDisassembler
+public enum JTypeType
 {
+	// sigend byte
+	Byte = 'B',
+	// utf16
+	Char = 'C',
+	Double = 'D',
+	Float = 'F',
+	Int = 'I',
+	Long = 'J',
+	Object = 'L',
+	Short = 'S',
+	Boolean = 'Z',
+	Method,
+}
 
-	public enum ConstantType
+public class JType
+{
+	JTypeType Type;
+	ushort ArrayDimension = 0;
+	string ObjectType = "";
+	JType[]? MethodParameters;
+	JType? ReturnType;
+
+	public uint ReadLength { get; init; }
+
+	public JType()
 	{
-		None = 0,
-		String,
-		Integer = 3,
-		Float,
-		Long,
-		Double,
-		Class,
-		StringReference,
-		FieldReference,
-		MethodReference,
-		InterfaceMethodReference,
-		NameTypeDescriptor,
-		MethodHandle = 15,
-		MethodType,
-		Dynamic,
-		InvokeDynamic,
-		//Module,
-		//Package
+		Type = JTypeType.Object;
 	}
 
-	public enum JTypeType
+	public JType(string encoded_type)
 	{
-		// sigend byte
-		Byte = 'B',
-		// utf16
-		Char = 'C',
-		Double = 'D',
-		Float = 'F',
-		Int = 'I',
-		Long = 'J',
-		Object = 'L',
-		Short = 'S',
-		Boolean = 'Z',
-		Method,
-	}
+		if (encoded_type == "") return;
 
-	public class JType
-	{
-		JTypeType Type;
-		ushort ArrayDimension = 0;
-		string ObjectType = "";
-		JType[]? MethodParameters;
-		JType? ReturnType;
+		int strlen = encoded_type.Length;
 
-		public uint ReadLength { get; init; };
-
-		public JType()
+		// check for arrays
+		ArrayDimension = 0;
+		for (int i = 0; i < strlen; i++)
 		{
-			Type = JTypeType.Object;
+			if (encoded_type[i] != '[')
+				break;
+			ArrayDimension++;
 		}
 
-		public JType(string encoded_type)
+		// removed prefixed array decorator "[[["
+		encoded_type = encoded_type.Substring(ArrayDimension);
+
+		ReadLength = ArrayDimension + 1U;
+
+		switch (encoded_type[0])
 		{
-			if (encoded_type == "") return;
-
-			int strlen = encoded_type.Length;
-
-			// check for arrays
-			ArrayDimension = 0;
-			for (int i = 0; i < strlen; i++)
+			case 'B':
 			{
-				if (encoded_type[i] != '[')
-					break;
-				ArrayDimension++;
-			}
-
-			// removed prefixed array decorator "[[["
-			encoded_type = encoded_type.Substring(ArrayDimension);
-
-			ReadLength = ArrayDimension + 1U;
-
-			switch (encoded_type[0])
-			{
-				case 'B':
-				{
-					Type = JTypeType.Byte;
-					return;
-				}
-				case 'C':
-				{
-					Type = JTypeType.Char;
-					return;
-				}
-				case 'D':
-				{
-					Type = JTypeType.Double;
-					return;
-				}
-				case 'F':
-				{
-					Type = JTypeType.Float;
-					return;
-				}
-				case 'I':
-				{
-					Type = JTypeType.Int;
-					return;
-				}
-				case 'J':
-				{
-					Type = JTypeType.Long;
-					return;
-				}
-				case 'S':
-				{
-					Type = JTypeType.Short;
-					return;
-				}
-				case 'Z':
-				{
-					Type = JTypeType.Boolean;
-					return;
-				}
-				// TYPE
-				case 'L':
-				{
-					Type = JTypeType.Object;
-
-					int semicolon_pos = encoded_type.IndexOf(';');
-					if (semicolon_pos == -1)
-					{
-						throw new InvalidDataException($"Object Type Does Not have The Terminating Semicolon: \"{encoded_type}\"");
-					}
-
-					ObjectType = encoded_type.Substring(1, semicolon_pos);
-
-					// The prefixed 'L' and array decorators are handled before the switch
-					ReadLength += (uint)ObjectType.Length + 1U;
-
-					return;
-				}
-				// method
-				case '(':
-				{
-					int end_para = encoded_type.IndexOf(')', 1);
-					if (end_para == -1)
-					{
-						throw new InvalidDataException($"Ill-Formed Method JType: \"{encoded_type}\"");
-					}
-
-
-					string parameters_typing = encoded_type.Substring(1, end_para);
-					string return_type = encoded_type.Substring(end_para + 1);
-
-					// the return_type read length might vary for it's just the rest of the string
-					// and in need for parsing
-					ReadLength += (uint)parameters_typing.Length + 2U;
-					
-					try
-					{
-						ReturnType = new JType(return_type);
-					}
-					catch (Exception)
-					{
-						Console.WriteLine("Error While Parsing Return Type For Method JType:" );
-						Console.WriteLine($"Encoded type: \"{encoded_type}\"");
-						Console.WriteLine($"Return type: \"{return_type}\"");
-						throw;
-					}
-
-					ReadLength += ReturnType.ReadLength;
-
-					List<JType> parameters = new(8);
-
-					for (uint i = 0U; i < parameters_typing.Length; i++)
-					{
-						// TODO: CATCH EXCEPTIONS FOR MORE DETAILS
-						JType type = new(parameters_typing.Substring((int)i));
-
-						i += type.ReadLength;
-
-						parameters.Add(type);
-					}
-
-					break;
-				}
-				default:
-				{
-					throw new InvalidDataException($"Invalid Encoding For JType: \"{encoded_type}\"");
-				}
-			}
-
-		}
-
-		public JType(JTypeType type, ushort arr_d, string obj_type)
-		{
-			Type = type;
-			ArrayDimension = arr_d;
-			ObjectType = obj_type;
-		}
-
-
-	}
-
-
-	public class Constant
-	{
-		public ConstantType type;
-
-		public int IntegerValue { get => (int)long_int; set => long_int = value; }
-		public long LongValue { get => long_int; set => long_int = value; }
-
-		public float FloatValue { get => (float)double_float; set => double_float = value; }
-		public double DoubleValue { get => double_float; set => double_float = value; }
-
-		public ushort ClassIndex { get => index1; set => index1 = value; }
-		public ushort StringIndex { get => index1; set => index1 = value; }
-		public ushort NameTypeIndex { get => index2; set => index2 = value; }
-		public ushort NameIndex { get => index1; set => index1 = value; }
-		public ushort DescriptorIndex { get => index2; set => index2 = value; }
-		public byte ReferenceKind { get => (byte)index1; set => index1 = value; }
-		public ushort ReferenceIndex { get => index2; set => index2 = value; }
-
-		public ushort BootstrapMethodAttrIndex { get => index1; set => index1 = value; }
-
-		public string String { get; set; } = "";
-
-		private ushort index1;
-		private ushort index2;
-		private long long_int;
-		private double double_float;
-	}
-
-	public class Attribute
-	{
-		public ushort NameIndex;
-		public byte[]? _data;
-	}
-
-	public class Field
-	{
-		public ushort AccessFlags;
-		public ushort NameIndex;
-		public ushort DescriptorIndex;
-		public Attribute[]? Attributes;
-	}
-	public class Method
-	{
-		public ushort AccessFlags;
-		public ushort NameIndex;
-		public ushort DescriptorIndex;
-		public Attribute[]? Attributes;
-	}
-
-	public class Disassembly
-	{
-		public ushort VersionMinor;
-		public ushort VersionMajor;
-		public Constant[]? Constants;
-		public ushort AccessFlags;
-		public ushort ThisClass;
-		public ushort SuperClass;
-		public ushort[]? Interfaces;
-		public Field[]? Fields;
-		public Method[]? Methods;
-		public Attribute[]? Attributes;
-
-		// constant index X (X for the class file) is Constant[ConstantIndexRoutingTable[X]]
-		public ushort[]? ConstantIndexRoutingTable;
-
-		public static string DecryptType(string type_desc)
-		{
-			ushort array_dim = 0;
-			string base_type = "";
-			for (int i = 0; i < type_desc.Length; i++)
-			{
-				if (type_desc[i] == '[')
-				{
-					array_dim++;
-					continue;
-				}
-				base_type = type_desc.Substring(i);
+				Type = JTypeType.Byte;
 				break;
 			}
-
-			if (base_type == "")
+			case 'C':
 			{
-				return "";
+				Type = JTypeType.Char;
+				break;
 			}
-			StringBuilder builder = new StringBuilder(base_type.Length + (array_dim * 2) + 1);
-			builder.Append(base_type.Replace('/', '.').Replace('$', '.'));
-			for (int i = 0; i < array_dim; i++)
+			case 'D':
 			{
-				builder.Append("[]");
+				Type = JTypeType.Double;
+				break;
 			}
+			case 'F':
+			{
+				Type = JTypeType.Float;
+				break;
+			}
+			case 'I':
+			{
+				Type = JTypeType.Int;
+				break;
+			}
+			case 'J':
+			{
+				Type = JTypeType.Long;
+				break;
+			}
+			case 'S':
+			{
+				Type = JTypeType.Short;
+				break;
+			}
+			case 'Z':
+			{
+				Type = JTypeType.Boolean;
+				break;
+			}
+			// TYPE
+			case 'L':
+			{
+				Type = JTypeType.Object;
 
-			return builder.ToString();
+				int semicolon_pos = encoded_type.IndexOf(';');
+				if (semicolon_pos == -1)
+				{
+					throw new InvalidDataException($"Object Type Does Not have The Terminating Semicolon: \"{encoded_type}\"");
+				}
+
+				ObjectType = encoded_type.Substring(1, semicolon_pos);
+
+				// The prefixed 'L' and array decorators are handled before the switch
+				ReadLength += (uint)ObjectType.Length + 1U;
+
+				break;
+			}
+			// method
+			case '(':
+			{
+				int end_para = encoded_type.IndexOf(')', 1);
+				if (end_para == -1)
+				{
+					throw new InvalidDataException($"Ill-Formed Method JType: \"{encoded_type}\"");
+				}
+
+
+				string parameters_typing = encoded_type.Substring(1, end_para);
+				string return_type = encoded_type.Substring(end_para + 1);
+
+				// the return_type read length might vary for it's just the rest of the string
+				// and in need for parsing
+				ReadLength += (uint)parameters_typing.Length + 2U;
+
+				try
+				{
+					ReturnType = new JType(return_type);
+				}
+				catch (Exception)
+				{
+					Console.WriteLine("Error While Parsing Return Type For Method JType:");
+					Console.WriteLine($"Encoded type: \"{encoded_type}\"");
+					Console.WriteLine($"Return type: \"{return_type}\"");
+					throw;
+				}
+
+				ReadLength += ReturnType.ReadLength;
+
+				List<JType> parameters = new(8);
+
+				for (uint i = 0U; i < parameters_typing.Length; i++)
+				{
+					// TODO: CATCH EXCEPTIONS FOR MORE DETAILS
+					JType type = new(parameters_typing.Substring((int)i));
+
+					// only for parsing, read length already adjusted after parameters_typing is defined
+					i += type.ReadLength;
+
+					parameters.Add(type);
+				}
+
+				break;
+			}
+			default:
+			{
+				throw new InvalidDataException($"Invalid Encoding For JType: \"{encoded_type}\"");
+			}
 		}
 
-		public string GenerateSource()
-		{
-			StringBuilder builder = new(4096);
 
-			builder.Append("class ");
-
-			return builder.ToString();
-		}
-
-		public void BuildCIRT()
-		{
-			ConstantIndexRoutingTable = new ushort[Constants.Length + 1];
-			int offset = 1;
-			for (int i = 0; i < ConstantIndexRoutingTable.Length; i++)
-			{
-				ConstantIndexRoutingTable[i] = (ushort)(i + offset);
-				//if (Constants[i].type == ConstantType.Double || Constants[i].type == ConstantType.Long)
-				//{
-				//	offset++;
-				//}
-			}
-		}
 
 	}
+
+	public JType(JTypeType type, ushort arr_d, string obj_type)
+	{
+		Type = type;
+		ArrayDimension = arr_d;
+		ObjectType = obj_type;
+	}
+
+
+}
+
+public enum ConstantType
+{
+	None = 0,
+	String,
+	Integer = 3,
+	Float,
+	Long,
+	Double,
+	Class,
+	StringReference,
+	FieldReference,
+	MethodReference,
+	InterfaceMethodReference,
+	NameTypeDescriptor,
+	MethodHandle = 15,
+	MethodType,
+	Dynamic,
+	InvokeDynamic,
+	//Module,
+	//Package
+}
+
+
+
+
+public class Constant
+{
+	public ConstantType type;
+
+	public int IntegerValue { get => (int)long_int; set => long_int = value; }
+	public long LongValue { get => long_int; set => long_int = value; }
+
+	public float FloatValue { get => (float)double_float; set => double_float = value; }
+	public double DoubleValue { get => double_float; set => double_float = value; }
+
+	public ushort ClassIndex { get => index1; set => index1 = value; }
+	public ushort StringIndex { get => index1; set => index1 = value; }
+	public ushort NameTypeIndex { get => index2; set => index2 = value; }
+	public ushort NameIndex { get => index1; set => index1 = value; }
+	public ushort DescriptorIndex { get => index2; set => index2 = value; }
+	public byte ReferenceKind { get => (byte)index1; set => index1 = value; }
+	public ushort ReferenceIndex { get => index2; set => index2 = value; }
+
+	public ushort BootstrapMethodAttrIndex { get => index1; set => index1 = value; }
+
+	public string String { get; set; } = "";
+
+	private ushort index1;
+	private ushort index2;
+	private long long_int;
+	private double double_float;
+}
+
+public class Attribute
+{
+	public ushort NameIndex;
+	public byte[]? _data;
+}
+
+public class Field
+{
+	public ushort AccessFlags;
+	public ushort NameIndex;
+	public ushort DescriptorIndex;
+	public Attribute[]? Attributes;
+}
+public class Method
+{
+	public ushort AccessFlags;
+	public ushort NameIndex;
+	public ushort DescriptorIndex;
+	public Attribute[]? Attributes;
+}
+
+public class Disassembly
+{
+	public ushort VersionMinor;
+	public ushort VersionMajor;
+	public Constant[]? Constants;
+	public ushort AccessFlags;
+	public ushort ThisClass;
+	public ushort SuperClass;
+	public ushort[]? Interfaces;
+	public Field[]? Fields;
+	public Method[]? Methods;
+	public Attribute[]? Attributes;
+
+	// constant index X (X for the class file) is Constant[ConstantIndexRoutingTable[X]]
+	public ushort[]? ConstantIndexRoutingTable;
+
+	public static string DecryptType(string type_desc)
+	{
+		ushort array_dim = 0;
+		string base_type = "";
+		for (int i = 0; i < type_desc.Length; i++)
+		{
+			if (type_desc[i] == '[')
+			{
+				array_dim++;
+				continue;
+			}
+			base_type = type_desc.Substring(i);
+			break;
+		}
+
+		if (base_type == "")
+		{
+			return "";
+		}
+		StringBuilder builder = new StringBuilder(base_type.Length + (array_dim * 2) + 1);
+		builder.Append(base_type.Replace('/', '.').Replace('$', '.'));
+		for (int i = 0; i < array_dim; i++)
+		{
+			builder.Append("[]");
+		}
+
+		return builder.ToString();
+	}
+
+	public string GenerateSource()
+	{
+		StringBuilder builder = new(4096);
+
+		builder.Append("class ");
+
+		return builder.ToString();
+	}
+
+	public void BuildCIRT()
+	{
+		ConstantIndexRoutingTable = new ushort[Constants.Length + 1];
+		int offset = 1;
+		for (int i = 0; i < ConstantIndexRoutingTable.Length; i++)
+		{
+			ConstantIndexRoutingTable[i] = (ushort)(i + offset);
+			//if (Constants[i].type == ConstantType.Double || Constants[i].type == ConstantType.Long)
+			//{
+			//	offset++;
+			//}
+		}
+	}
+
+}
+
+static public class JDisassembler
+{
 
 	private class JReader
 	{
@@ -640,7 +645,7 @@ internal class Program
 
 		FileStream stream = File.OpenRead(base_path + "Util.class");
 		BinaryReader br = new(stream);
-		JDisassembler.Disassembly disassembly;
+		Disassembly disassembly;
 		Console.WriteLine(JDisassembler.Decompile(br, out disassembly));
 		Console.ReadKey();
 	}
