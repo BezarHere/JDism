@@ -7,6 +7,212 @@ using System.Text;
 
 namespace JDism;
 
+public enum VMOpCode : short
+{
+	Nop = 0,
+	AconstNull,
+	IconstM1,
+	Iconst0,
+	Iconst1,
+	Iconst2,
+	Iconst3,
+	Iconst4,
+	Iconst5,
+	Lconst0,
+	Lconst1,
+	Fconst0,
+	Fconst1,
+	Fconst2,
+	Dconst0,
+	Dconst1,
+	Bipush,
+	Sipush,
+	Ldc,
+	LdcW,
+	Ldc2W,
+	Iload,
+	Lload,
+	Fload,
+	Dload,
+	Aload,
+	Iload0,
+	Iload1,
+	Iload2,
+	Iload3,
+	Lload0,
+	Lload1,
+	Lload2,
+	Lload3,
+	Fload0,
+	Fload1,
+	Fload2,
+	Fload3,
+	Dload0,
+	Dload1,
+	Dload2,
+	Dload3,
+	Aload0,
+	Aload1,
+	Aload2,
+	Aload3,
+	Iaload,
+	Laload,
+	Faload,
+	Daload,
+	Aaload,
+	Baload,
+	Caload,
+	Saload,
+	Istore,
+	Lstore,
+	Fstore,
+	Dstore,
+	Astore,
+	Istore0,
+	Istore1,
+	Istore2,
+	Istore3,
+	Lstore0,
+	Lstore1,
+	Lstore2,
+	Lstore3,
+	Fstore0,
+	Fstore1,
+	Fstore2,
+	Fstore3,
+	Dstore0,
+	Dstore1,
+	Dstore2,
+	Dstore3,
+	Astore0,
+	Astore1,
+	Astore2,
+	Astore3,
+	Iastore,
+	Lastore,
+	Fastore,
+	Dastore,
+	Aastore,
+	Bastore,
+	Castore,
+	Sastore,
+	Pop,
+	Pop2,
+	Dup,
+	DupX1,
+	DupX2,
+	Dup2,
+	Dup2X1,
+	Dup2X2,
+	Swap,
+	Iadd,
+	Ladd,
+	Fadd,
+	Dadd,
+	Isub,
+	Lsub,
+	Fsub,
+	Dsub,
+	Imul,
+	Lmul,
+	Fmul,
+	Dmul,
+	Idiv,
+	Ldiv,
+	Fdiv,
+	Ddiv,
+	Irem,
+	Lrem,
+	Frem,
+	Drem,
+	Ineg,
+	Lneg,
+	Fneg,
+	Dneg,
+	Ishl,
+	Lshl,
+	Ishr,
+	Lshr,
+	Iushr,
+	Lushr,
+	Iand,
+	Land,
+	Ior,
+	Lor,
+	Ixor,
+	Lxor,
+	Iinc,
+	I2l,
+	I2f,
+	I2d,
+	L2i,
+	L2f,
+	L2d,
+	F2i,
+	F2l,
+	F2d,
+	D2i,
+	D2l,
+	D2f,
+	I2b,
+	I2c,
+	I2s,
+	Lcmp,
+	Fcmpl,
+	Fcmpg,
+	Dcmpl,
+	Dcmpg,
+	Ifeq,
+	Ifne,
+	Iflt,
+	Ifge,
+	Ifgt,
+	Ifle,
+	IfIcmpeq,
+	IfIcmpne,
+	IfIcmplt,
+	IfIcmpge,
+	IfIcmpgt,
+	IfIcmple,
+	IfAcmpeq,
+	IfAcmpne,
+	Goto,
+	Jsr,
+	Ret,
+	Tableswitch,
+	Lookupswitch,
+	Ireturn,
+	Lreturn,
+	Freturn,
+	Dreturn,
+	Areturn,
+	Return,
+	Getstatic,
+	Putstatic,
+	Getfield,
+	Putfield,
+	Invokevirtual,
+	Invokespecial,
+	Invokestatic,
+	Invokeinterface,
+	Invokedynamic,
+	New,
+	Newarray,
+	Anewarray,
+	Arraylength,
+	Athrow,
+	Checkcast,
+	Instanceof,
+	Monitorenter,
+	Monitorexit,
+	Wide,
+	Multianewarray,
+	Ifnull,
+	Ifnonnull,
+	GotoW,
+	JsrW
+}
+
 public enum MethodReferenceKind : byte
 {
 	None = 0,
@@ -230,6 +436,7 @@ public class JType
 	public string ObjectType = "";
 	public JType[]? MethodParameters;
 	public JType? ReturnType;
+	public JType[]? Generics;
 
 	public uint ReadLength { get; init; }
 
@@ -340,7 +547,7 @@ public class JType
 
 				// the return_type read length might vary for it's just the rest of the string
 				// and in need for parsing
-				ReadLength += (uint)parameters_typing.Length + 2U;
+				ReadLength += 2U;
 
 				try
 				{
@@ -365,6 +572,7 @@ public class JType
 
 					// only for parsing, read length already adjusted after parameters_typing is defined
 					i += type.ReadLength;
+					ReadLength += type.ReadLength;
 
 					parameters.Add(type);
 				}
@@ -377,6 +585,42 @@ public class JType
 			{
 				throw new InvalidDataException($"Invalid Encoding For JType: \"{encoded_type}\"");
 			}
+		}
+
+		// shouldn't be bigger then the encoded length
+		if (ReadLength >= encoded_type.Length)
+		{
+			return;
+		}
+
+		encoded_type = encoded_type.Substring((int)ReadLength);
+
+		if (!string.IsNullOrEmpty(encoded_type) && encoded_type[0] == '<')
+		{
+			int end_arrow = encoded_type.IndexOf('>', 1);
+			if (end_arrow == -1)
+			{
+				throw new InvalidDataException($"Invalid generics {encoded_type}");
+			}
+
+			string generics_raw = end_arrow == 1 ? "" : encoded_type.Substring(1, end_arrow - 1);
+
+			ReadLength += (uint)generics_raw.Length + 2u;
+
+			List<JType> generics = new(8);
+
+			for (uint i = 0U; i < generics_raw.Length;)
+			{
+				// TODO: CATCH EXCEPTIONS FOR MORE DETAILS
+				JType type = new(generics_raw.Substring((int)i));
+
+				// only for parsing, read length already adjusted after parameters_typing is defined
+				i += type.ReadLength;
+
+				generics.Add(type);
+			}
+
+			Generics = generics.ToArray();
 		}
 
 	}
@@ -425,7 +669,7 @@ public class JType
 				stringBuilder.Append("boolean");
 				break;
 			case JTypeType.Method:
-				// TODO
+				// TODO?
 				stringBuilder.Append($"Function<{ReturnType.ToString()}, ...>");
 				break;
 			default:
@@ -433,6 +677,20 @@ public class JType
 				break;
 		}
 
+		if (Generics is not null)
+		{
+			stringBuilder.Append('<');
+			for (int i = 0; i < Generics.Length; i++)
+			{
+				if (i > 0)
+				{
+					stringBuilder.Append(", ");
+				}
+
+				stringBuilder.Append(Generics[i].ToString());
+			}
+			stringBuilder.Append('>');
+		}
 
 		for (ushort i = 0; i < ArrayDimension; i++)
 			stringBuilder.Append("[]");
@@ -616,7 +874,8 @@ public class Disassembly
 
 		foreach (Field field in Fields)
 		{
-			// TODO: annotations
+			builder.Append(AttributesToAnnotations(field.Attributes));
+
 			AccessFlagsUtil.ToString((string s) => builder.Append(s).Append(' '), field.AccessFlags);
 			builder.Append(JType.ShortenTypeName(field.ValueType.ToString())).Append(' ');
 			builder.Append(field.Name).Append(";\n");
@@ -624,9 +883,11 @@ public class Disassembly
 
 		foreach (Method method in Methods)
 		{
+			builder.Append(AttributesToAnnotations(method.Attributes));
+
 			// TODO: annotations
 			AccessFlagsUtil.ToString((string s) => builder.Append(s).Append(' '), method.AccessFlags);
-			
+
 
 			// name
 			if (method.Name == "<init>")
@@ -634,10 +895,21 @@ public class Disassembly
 				// no return for constructor
 				builder.Append(class_name);
 			}
+			else if (method.Name == "<clinit>")
+			{
+				// no return for constructor
+				builder.Append('~').Append(class_name);
+			}
 			else
 			{
 				// return
 				builder.Append(JType.ShortenTypeName(method.MethodType.ReturnType.ToString())).Append(' ');
+				bool internal_name = method.Name.Contains('$');
+				if (internal_name)
+				{
+					builder.Append("__");
+				}
+
 				builder.Append(method.Name.Replace('$', '_'));
 			}
 			// parameters
@@ -652,6 +924,8 @@ public class Disassembly
 				}
 
 				builder.Append(JType.ShortenTypeName(method_param.ToString()));
+				builder.Append(' ');
+				builder.Append($"parameter_{i}");
 			}
 
 			builder.Append(')').Append(";\n");
@@ -891,6 +1165,33 @@ public class Disassembly
 				SetupMethod(method);
 			}
 		}
+	}
+
+	private string AttributesToAnnotations(Attribute[] attributes)
+	{
+		StringBuilder sb = new StringBuilder();
+
+		foreach (Attribute attribute in attributes)
+		{
+
+			sb.Append('@').Append(attribute.Name);
+			sb.Append('(');
+
+			for (int i = 0; i < attribute._data.Length; i++)
+			{
+				if (i > 0)
+				{
+					sb.Append(", ");
+				}
+
+				sb.Append($"0x{attribute._data[i]:X}");
+			}
+
+			sb.Append(')');
+			sb.Append('\n');
+		}
+
+		return sb.ToString();
 	}
 
 	private bool IsConstantOfType(ushort index, ConstantType type)
