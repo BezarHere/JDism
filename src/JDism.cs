@@ -4,6 +4,8 @@ using System.Reflection;
 using System.Runtime;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Reflection.Emit;
+using System.ComponentModel;
 
 namespace JDism;
 
@@ -670,7 +672,7 @@ public class JType
 				break;
 			case JTypeType.Method:
 				// TODO?
-				stringBuilder.Append($"Function<{ReturnType.ToString()}, ...>");
+				stringBuilder.Append($"Function<{ReturnType?.ToString()}, ...>");
 				break;
 			default:
 				stringBuilder.Append("Object");
@@ -769,11 +771,48 @@ public class Constant
 
 }
 
-public struct Attribute
+public class Attribute
 {
+	public struct ConstantValueInfo
+	{
+		public ushort Index;
+	}
+	public record ExceptionRecord(ushort StartPc, ushort EndPc, ushort HandlerPc, ushort CatchType);
+
+	public struct CodeInfo
+	{
+
+		public ushort MaxStack;
+		public ushort MaxLocals;
+		public byte[] ByteCode;
+
+		public ExceptionRecord[] ExceptionRecords;
+		public Attribute[] Attributes;
+	}
+
+	public record VerificationTypeRecord(byte Type, ushort Index);
+
+	public struct StackMapFrameInfo
+	{
+		public byte Type = 255;
+		public ushort OffsetDelta = 0;
+		public VerificationTypeRecord[] Locals = [];
+		public VerificationTypeRecord[] Stack = [];
+
+		public StackMapFrameInfo()
+		{
+		}
+	}
+
 	public AttributeType Type;
 	public ushort NameIndex;
-	public string Name;
+	public string Name = "";
+
+
+
+	public ConstantValueInfo ConstantValue;
+	public CodeInfo Code;
+	public StackMapFrameInfo[] StackMapTable = [];
 
 	// for custom defined attributes
 	public byte[]? _data;
@@ -785,7 +824,7 @@ public class Field
 	public ushort NameIndex;
 	public string? Name;
 	public ushort DescriptorIndex;
-	public JType ValueType;
+	public JType? ValueType;
 	public Attribute[]? Attributes;
 }
 public class Method
@@ -794,7 +833,7 @@ public class Method
 	public ushort NameIndex;
 	public string? Name;
 	public ushort DescriptorIndex;
-	public JType MethodType;
+	public JType? MethodType;
 	public Attribute[]? Attributes;
 }
 
@@ -872,64 +911,72 @@ public class Disassembly
 
 		builder.Append("{\n");
 
-		foreach (Field field in Fields)
+		if (Fields is not null)
 		{
-			builder.Append(AttributesToAnnotations(field.Attributes));
+			foreach (Field field in Fields)
+			{
+				if (field.Attributes is not null)
+					builder.Append(AttributesToAnnotations(field.Attributes));
 
-			AccessFlagsUtil.ToString((string s) => builder.Append(s).Append(' '), field.AccessFlags);
-			builder.Append(JType.ShortenTypeName(field.ValueType.ToString())).Append(' ');
-			builder.Append(field.Name).Append(";\n");
+				AccessFlagsUtil.ToString((string s) => builder.Append(s).Append(' '), field.AccessFlags);
+				builder.Append(field.ValueType is not null ? JType.ShortenTypeName(field.ValueType.ToString()) : "NULL").Append(' ');
+				builder.Append(field.Name).Append(";\n");
+			}
 		}
 
-		foreach (Method method in Methods)
+		if (Methods is not null)
 		{
-			builder.Append(AttributesToAnnotations(method.Attributes));
-
-			// TODO: annotations
-			AccessFlagsUtil.ToString((string s) => builder.Append(s).Append(' '), method.AccessFlags);
-
-
-			// name
-			if (method.Name == "<init>")
+			foreach (Method method in Methods)
 			{
-				// no return for constructor
-				builder.Append(class_name);
-			}
-			else if (method.Name == "<clinit>")
-			{
-				// no return for constructor
-				builder.Append('~').Append(class_name);
-			}
-			else
-			{
-				// return
-				builder.Append(JType.ShortenTypeName(method.MethodType.ReturnType.ToString())).Append(' ');
-				bool internal_name = method.Name.Contains('$');
-				if (internal_name)
+				if (method.Attributes is not null)
+					builder.Append(AttributesToAnnotations(method.Attributes));
+
+				// TODO: annotations
+				AccessFlagsUtil.ToString((string s) => builder.Append(s).Append(' '), method.AccessFlags);
+
+
+				// name
+				if (method.Name == "<init>")
 				{
-					builder.Append("__");
+					// no return for constructor
+					builder.Append(class_name);
+				}
+				else if (method.Name == "<clinit>")
+				{
+					// no return for constructor
+					builder.Append('~').Append(class_name);
+				}
+				else
+				{
+					// return
+					builder.Append(JType.ShortenTypeName(method.MethodType.ReturnType.ToString())).Append(' ');
+					bool internal_name = method.Name.Contains('$');
+					if (internal_name)
+					{
+						builder.Append("__");
+					}
+
+					builder.Append(method.Name.Replace('$', '_'));
+				}
+				// parameters
+				builder.Append('(');
+
+				for (int i = 0; i < method.MethodType.MethodParameters.Length; i++)
+				{
+					JType method_param = method.MethodType.MethodParameters[i];
+					if (i > 0)
+					{
+						builder.Append(", ");
+					}
+
+					builder.Append(JType.ShortenTypeName(method_param.ToString()));
+					builder.Append(' ');
+					builder.Append($"parameter_{i}");
 				}
 
-				builder.Append(method.Name.Replace('$', '_'));
+				builder.Append(')').Append(";\n");
+
 			}
-			// parameters
-			builder.Append('(');
-
-			for (int i = 0; i < method.MethodType.MethodParameters.Length; i++)
-			{
-				JType method_param = method.MethodType.MethodParameters[i];
-				if (i > 0)
-				{
-					builder.Append(", ");
-				}
-
-				builder.Append(JType.ShortenTypeName(method_param.ToString()));
-				builder.Append(' ');
-				builder.Append($"parameter_{i}");
-			}
-
-			builder.Append(')').Append(";\n");
-
 		}
 
 		builder.Append("}");
@@ -1226,16 +1273,62 @@ public class Disassembly
 	{
 		for (int i = 0; i < attrs.Length; i++)
 		{
+			Attribute attribute = attrs[i];
+
 			// TODO: check the name index
-			attrs[i].Name = Constants[attrs[i].NameIndex - 1].String;
-			if (sAttributeTypeNames.TryGetValue(attrs[i].Name, out AttributeType value))
+			attribute.Name = Constants[attribute.NameIndex - 1].String;
+			if (sAttributeTypeNames.TryGetValue(attribute.Name, out AttributeType value))
 			{
-				attrs[i].Type = value;
+				attribute.Type = value;
 			}
 			else
 			{
-				attrs[i].Type = AttributeType.UserDefined;
+				attribute.Type = AttributeType.UserDefined;
 			}
+
+			if (attribute.Type == AttributeType.ConstantValue)
+			{
+				if (attribute._data.Length != 2)
+				{
+					throw new InvalidDataException("constant value attribute should have 2 bytes of data");
+				}
+				attribute.ConstantValue.Index = (ushort)((attribute._data[0] << 8) | attribute._data[1]);
+			}
+			else if (attribute.Type == AttributeType.Code)
+			{
+				if (attribute._data.Length < 8)
+				{
+					throw new InvalidDataException($"code attribute should have atleast 8 bytes of data, but it has {attribute._data.Length}");
+				}
+
+				int read_index = 0;
+				attribute.Code.MaxStack = (ushort)((attribute._data[read_index] << 8) | attribute._data[read_index + 1]);
+				read_index += 2;
+
+				attribute.Code.MaxLocals = (ushort)((attribute._data[read_index] << 8) | attribute._data[read_index + 1]);
+				read_index += 2;
+
+				int code_len =
+					(ushort)((attribute._data[read_index] << 24) | (attribute._data[read_index + 1] << 16) |
+					(attribute._data[read_index + 2] << 8) | attribute._data[read_index + 3]);
+
+				read_index += 4;
+
+				// copy byte code
+				attribute.Code.ByteCode = new byte[code_len];
+				Array.Copy(attribute._data, read_index, attribute.Code.ByteCode, 0, attribute.Code.ByteCode.Length);
+				read_index += code_len;
+
+				
+				int exception_table_len =
+					(ushort)((attribute._data[read_index] << 24) | (attribute._data[read_index + 1] << 16) |
+					(attribute._data[read_index + 2] << 8) | attribute._data[read_index + 3]);
+				read_index += 4;
+
+				// TODO
+
+			}
+
 		}
 	}
 
