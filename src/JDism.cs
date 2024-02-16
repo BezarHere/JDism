@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Reflection.Emit;
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 
 namespace JDism;
 
@@ -436,9 +437,9 @@ public class JType
 	public JTypeType Type;
 	public ushort ArrayDimension = 0;
 	public string ObjectType = "";
-	public JType[]? MethodParameters;
-	public JType? ReturnType;
-	public JType[]? Generics;
+	public JType[] MethodParameters = [];
+	public JType ReturnType;
+	public JType[] Generics = [];
 
 	public uint ReadLength { get; init; }
 
@@ -679,7 +680,7 @@ public class JType
 				break;
 		}
 
-		if (Generics is not null)
+		if (Generics is not null && Generics.Length != 0)
 		{
 			stringBuilder.Append('<');
 			for (int i = 0; i < Generics.Length; i++)
@@ -777,6 +778,11 @@ public class Attribute
 	{
 		public ushort Index;
 	}
+	public struct SignatureInfo
+	{
+		public ushort Index;
+		public string Value;
+	}
 	public record ExceptionRecord(ushort StartPc, ushort EndPc, ushort HandlerPc, ushort CatchType);
 
 	public struct CodeInfo
@@ -811,36 +817,85 @@ public class Attribute
 
 
 	public ConstantValueInfo ConstantValue;
+	public SignatureInfo Signature;
 	public CodeInfo Code;
 	public StackMapFrameInfo[] StackMapTable = [];
 
 	// for custom defined attributes
-	public byte[]? _data;
+	public byte[] _data = [];
 }
 
 public class Field
 {
 	public FieldAccessFlags AccessFlags;
 	public ushort NameIndex;
-	public string? Name;
+	public string Name = "";
 	public ushort DescriptorIndex;
-	public JType? ValueType;
-	public Attribute[]? Attributes;
+	public JType ValueType = new();
+	public Attribute[] Attributes = [];
 }
 public class Method
 {
 	public MethodAccessFlags AccessFlags;
 	public ushort NameIndex;
-	public string? Name;
+	public string Name = "";
 	public ushort DescriptorIndex;
-	public JType? MethodType;
-	public Attribute[]? Attributes;
+	public JType MethodType = new();
+	public Attribute[] Attributes = [];
 }
 
 public struct ConstantError(ushort index, string msg = "")
 {
 	public ushort Index = index;
 	public string Message = msg;
+}
+// BIG ENDIAN
+internal class ByteReader
+{
+
+	public ByteReader(byte[] data)
+	{
+		_data = data;
+		Index = 0;
+	}
+
+	public void Read(byte[] bytes)
+	{
+		Read(bytes, 0, bytes.Length);
+	}
+
+	public void Read(byte[] bytes, int index, int len)
+	{
+		Array.Copy(_data, Index, bytes, index, len);
+		Index += index;
+	}
+
+	public byte Read8()
+	{
+		return _data[Index++];
+	}
+
+	public ushort Read16()
+	{
+		return (ushort)((_data[Index++] << 8) | _data[Index++]);
+	}
+
+	public uint Read32()
+	{
+		return (uint)((_data[Index++] << 24) | (_data[Index++] << 16) | (_data[Index++] << 8) | _data[Index++]);
+	}
+
+	public ulong Read64()
+	{
+		return (uint)(
+			(_data[Index++] << 56) | (_data[Index++] << 48) |
+			(_data[Index++] << 48) | (_data[Index++] << 32) |
+			(_data[Index++] << 24) | (_data[Index++] << 16) |
+			(_data[Index++] << 8) | _data[Index++]);
+	}
+
+	public int Index { get; private set; }
+	private byte[] _data;
 }
 
 public class Disassembly
@@ -851,13 +906,13 @@ public class Disassembly
 	public ClassAccessFlags AccessFlags;
 	public ushort ThisClass;
 	public ushort SuperClass;
-	public ushort[]? Interfaces;
-	public Field[]? Fields;
-	public Method[]? Methods;
-	public Attribute[]? Attributes;
+	public ushort[] Interfaces = [];
+	public Field[] Fields = [];
+	public Method[] Methods = [];
+	public Attribute[] Attributes = [];
 
 	// constant index X (X for the class file) is Constant[ConstantIndexRoutingTable[X]]
-	public ushort[]? ConstantIndexRoutingTable;
+	public ushort[] ConstantIndexRoutingTable = [];
 
 	public Disassembly()
 	{
@@ -1224,14 +1279,71 @@ public class Disassembly
 			sb.Append('@').Append(attribute.Name);
 			sb.Append('(');
 
-			for (int i = 0; i < attribute._data.Length; i++)
+			if (attribute.Type == AttributeType.Code)
 			{
-				if (i > 0)
+				sb.Append("locals=").Append(attribute.Code.MaxLocals);
+				sb.Append(", ");
+				sb.Append("stacksize=").Append(attribute.Code.MaxStack);
+				sb.Append(", ");
+				sb.Append("bytecode=[");
+				for (int i = 0; i < attribute.Code.ByteCode.Length; i++)
 				{
-					sb.Append(", ");
+					if (i > 0)
+					{
+						sb.Append(", ");
+					}
+
+					sb.Append($"0x{attribute.Code.ByteCode[i]:X}");
+				}
+				sb.Append(']');
+			}
+			else if (attribute.Type == AttributeType.ConstantValue)
+			{
+				Constant c = Constants[attribute.ConstantValue.Index - 1];
+				if (c is null)
+				{
+					sb.Append("null");
 				}
 
-				sb.Append($"0x{attribute._data[i]:X}");
+				else if (c.type == ConstantType.Integer)
+				{
+					sb.Append(c.IntegerValue);
+				}
+				else if (c.type == ConstantType.Long)
+				{
+					sb.Append(c.LongValue);
+				}
+				else if (c.type == ConstantType.Float)
+				{
+					sb.Append(c.FloatValue);
+				}
+				else if (c.type == ConstantType.Double)
+				{
+					sb.Append(c.DoubleValue);
+				}
+				else
+				{
+					sb.Append('"').Append(c.String).Append('"');
+				}
+
+			}
+			else if (attribute.Type == AttributeType.Signature)
+			{
+				sb.Append("index=").Append(attribute.Signature.Index);
+				sb.Append(", ");
+				sb.Append('"').Append(attribute.Signature.Value).Append('"');
+			}
+			else
+			{
+				for (int i = 0; i < attribute._data.Length; i++)
+				{
+					if (i > 0)
+					{
+						sb.Append(", ");
+					}
+
+					sb.Append($"0x{attribute._data[i]:X}");
+				}
 			}
 
 			sb.Append(')');
@@ -1269,14 +1381,54 @@ public class Disassembly
 		method.MethodType = new JType(Constants[method.DescriptorIndex - 1].String);
 	}
 
+	private void LoadCodeInfo(Attribute attribute)
+	{
+		ByteReader reader = new(attribute._data);
+
+		attribute.Code.MaxStack = reader.Read16();
+		attribute.Code.MaxLocals = reader.Read16();
+
+		uint code_len = reader.Read32();
+
+		// copy byte code
+		attribute.Code.ByteCode = new byte[code_len];
+		reader.Read(attribute.Code.ByteCode);
+
+
+		uint exception_table_len = reader.Read32();
+		if (exception_table_len > 16)
+			exception_table_len = 16;
+		attribute.Code.ExceptionRecords = new Attribute.ExceptionRecord[exception_table_len];
+
+
+		Attribute.ExceptionRecord ReadExceptionRecord()
+		{
+			return new(reader.Read16(), reader.Read16(), reader.Read16(), reader.Read16());
+		}
+
+		for (uint i = 0; i < exception_table_len; i++)
+		{
+			//attribute.Code.ExceptionRecords[i] = ReadExceptionRecord();
+		}
+
+		//uint subattrs_count = reader.Read32();
+
+		//attribute.Code.Attributes = new Attribute[subattrs_count];
+
+		// TODO: load the sub attributes
+
+	}
+
 	private void LoadAttributes(Attribute[] attrs)
 	{
 		for (int i = 0; i < attrs.Length; i++)
 		{
 			Attribute attribute = attrs[i];
+			ByteReader reader = new(attribute._data);
 
 			// TODO: check the name index
 			attribute.Name = Constants[attribute.NameIndex - 1].String;
+
 			if (sAttributeTypeNames.TryGetValue(attribute.Name, out AttributeType value))
 			{
 				attribute.Type = value;
@@ -1292,6 +1444,7 @@ public class Disassembly
 				{
 					throw new InvalidDataException("constant value attribute should have 2 bytes of data");
 				}
+
 				attribute.ConstantValue.Index = (ushort)((attribute._data[0] << 8) | attribute._data[1]);
 			}
 			else if (attribute.Type == AttributeType.Code)
@@ -1301,32 +1454,19 @@ public class Disassembly
 					throw new InvalidDataException($"code attribute should have atleast 8 bytes of data, but it has {attribute._data.Length}");
 				}
 
-				int read_index = 0;
-				attribute.Code.MaxStack = (ushort)((attribute._data[read_index] << 8) | attribute._data[read_index + 1]);
-				read_index += 2;
+				LoadCodeInfo(attribute);
 
-				attribute.Code.MaxLocals = (ushort)((attribute._data[read_index] << 8) | attribute._data[read_index + 1]);
-				read_index += 2;
+			}
+			else if (attribute.Type == AttributeType.Signature)
+			{
+				if (attribute._data.Length != 2)
+				{
+					throw new InvalidDataException($"signature attribute should have 2 bytes of data, but it has {attribute._data.Length}");
+				}
 
-				int code_len =
-					(ushort)((attribute._data[read_index] << 24) | (attribute._data[read_index + 1] << 16) |
-					(attribute._data[read_index + 2] << 8) | attribute._data[read_index + 3]);
+				attribute.Signature.Index = reader.Read16();
 
-				read_index += 4;
-
-				// copy byte code
-				attribute.Code.ByteCode = new byte[code_len];
-				Array.Copy(attribute._data, read_index, attribute.Code.ByteCode, 0, attribute.Code.ByteCode.Length);
-				read_index += code_len;
-
-				
-				int exception_table_len =
-					(ushort)((attribute._data[read_index] << 24) | (attribute._data[read_index + 1] << 16) |
-					(attribute._data[read_index + 2] << 8) | attribute._data[read_index + 3]);
-				read_index += 4;
-
-				// TODO
-
+				attribute.Signature.Value = Constants[attribute.Signature.Index - 1].String;
 			}
 
 		}
@@ -1610,8 +1750,17 @@ static public class JDisassembler
 			throw new ArgumentNullException("stream");
 		}
 
+		long MemUsagePrivate = 0;
+		long MemUsagePaged = 0;
 
-		disassembly = new Disassembly();
+		using (Process process = Process.GetCurrentProcess())
+		{
+			MemUsagePrivate = process.PrivateMemorySize64;
+			MemUsagePaged = process.PagedMemorySize64;
+		}
+
+
+			disassembly = new Disassembly();
 		JReader reader = new(stream);
 
 		uint signature = reader.ReadU32BE();
@@ -1716,6 +1865,16 @@ static public class JDisassembler
 		disassembly.PostProcess();
 		string text = disassembly.GenerateSource();
 		File.WriteAllText("output.java", text);
+
+		using (Process process = Process.GetCurrentProcess())
+		{
+			Console.WriteLine($"memory usage [private]: {process.PrivateMemorySize64 / (1<<20)}MB");
+			Console.WriteLine($"memory usage [paged]: {process.PagedMemorySize64 / (1 << 20)}MP");
+			Console.WriteLine($"disassembly memory usage [private]: {(process.PrivateMemorySize64 - MemUsagePrivate) / (1<<20)}MB");
+			Console.WriteLine($"disassembly memory usage [paged]: {(process.PagedMemorySize64 - MemUsagePaged) / (1 << 20)}MP");
+		}
+
+		
 
 		return string.Empty;
 	}

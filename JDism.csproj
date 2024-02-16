@@ -4,8 +4,21 @@
 		<OutputType>Exe</OutputType>
 		<TargetFramework>net8.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
-		<Nullable>enable</Nullable>
+		<Nullable>disable</Nullable>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<StartupObject>Program</StartupObject>
+		<GenerateDocumentationFile>False</GenerateDocumentationFile>
+		<ErrorReport>none</ErrorReport>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+	  <DebugType>embedded</DebugType>
+	  <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+	  <DebugType>embedded</DebugType>
+	  <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
 	</PropertyGroup>
 
 </Project>
