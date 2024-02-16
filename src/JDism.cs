@@ -1,4 +1,6 @@
-﻿using System.Reflection;
+﻿using System.Diagnostics;
+using System;
+using System.Reflection;
 using System.Runtime;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -21,6 +23,7 @@ public enum MethodReferenceKind : byte
 
 public enum JTypeType
 {
+	Void = 'V',
 	// signed byte
 	Byte = 'B',
 	// utf16
@@ -117,6 +120,109 @@ public enum ClassAccessFlags
 	Enum = 0x4000,
 }
 
+public static class AccessFlagsUtil
+{
+
+	public static void ToString(Action<string> loader, FieldAccessFlags accessFlags)
+	{
+		if (accessFlags.HasFlag(FieldAccessFlags.Public))
+		{
+			loader("public");
+		}
+		else if (accessFlags.HasFlag(FieldAccessFlags.Private))
+		{
+			loader("private");
+		}
+		else if (accessFlags.HasFlag(FieldAccessFlags.Protected))
+		{
+			loader("protected");
+		}
+
+		if (accessFlags.HasFlag(FieldAccessFlags.Static))
+		{
+			loader("static");
+		}
+
+		if (accessFlags.HasFlag(FieldAccessFlags.Final))
+		{
+			loader("final");
+		}
+
+		if (accessFlags.HasFlag(FieldAccessFlags.Volatile))
+		{
+			loader("volatile");
+		}
+
+		if (accessFlags.HasFlag(FieldAccessFlags.Transient))
+		{
+			loader("transient");
+		}
+	}
+
+	public static void ToString(Action<string> loader, MethodAccessFlags accessFlags)
+	{
+		if (accessFlags.HasFlag(MethodAccessFlags.Public))
+		{
+			loader("public");
+		}
+		else if (accessFlags.HasFlag(MethodAccessFlags.Private))
+		{
+			loader("private");
+		}
+		else if (accessFlags.HasFlag(MethodAccessFlags.Protected))
+		{
+			loader("protected");
+		}
+
+		if (accessFlags.HasFlag(MethodAccessFlags.Static))
+		{
+			loader("static");
+		}
+
+		if (accessFlags.HasFlag(MethodAccessFlags.Final))
+		{
+			loader("final");
+		}
+
+		else if (accessFlags.HasFlag(MethodAccessFlags.Abstract))
+		{
+			loader("abstract");
+		}
+	}
+
+	public static void ToString(Action<string> loader, ClassAccessFlags accessFlags)
+	{
+		if (accessFlags.HasFlag(ClassAccessFlags.Public))
+		{
+			loader("public");
+		}
+
+		if (accessFlags.HasFlag(ClassAccessFlags.Final))
+		{
+			loader("final");
+		}
+
+		if (accessFlags.HasFlag(ClassAccessFlags.Enum))
+		{
+			loader("enum");
+		}
+		else if (accessFlags.HasFlag(ClassAccessFlags.Interface))
+		{
+			loader("interface");
+		}
+		else if (accessFlags.HasFlag(ClassAccessFlags.Abstract))
+		{
+			loader("abstract class");
+		}
+		else
+		{
+			loader("class");
+		}
+	}
+
+
+}
+
 public class JType
 {
 	JTypeType Type;
@@ -154,6 +260,11 @@ public class JType
 
 		switch (encoded_type[0])
 		{
+			case 'V':
+			{
+				Type = JTypeType.Void;
+				break;
+			}
 			case 'B':
 			{
 				Type = JTypeType.Byte;
@@ -205,7 +316,7 @@ public class JType
 					throw new InvalidDataException($"Object Type Does Not have The Terminating Semicolon: \"{encoded_type}\"");
 				}
 
-				ObjectType = encoded_type.Substring(1, semicolon_pos);
+				ObjectType = encoded_type.Substring(1, semicolon_pos - 1);
 
 				// The prefixed 'L' and array decorators are handled before the switch
 				ReadLength += (uint)ObjectType.Length + 1U;
@@ -266,8 +377,6 @@ public class JType
 			}
 		}
 
-
-
 	}
 
 	public JType(JTypeType type, ushort arr_d, string obj_type)
@@ -277,6 +386,69 @@ public class JType
 		ObjectType = obj_type;
 	}
 
+	public override string ToString()
+	{
+		StringBuilder stringBuilder = new(ArrayDimension * 2 + 2);
+
+		switch (Type)
+		{
+			case JTypeType.Void:
+				stringBuilder.Append("void");
+				break;
+			case JTypeType.Byte:
+				stringBuilder.Append("byte");
+				break;
+			case JTypeType.Char:
+				stringBuilder.Append("char");
+				break;
+			case JTypeType.Double:
+				stringBuilder.Append("double");
+				break;
+			case JTypeType.Float:
+				stringBuilder.Append("float");
+				break;
+			case JTypeType.Int:
+				stringBuilder.Append("int");
+				break;
+			case JTypeType.Long:
+				stringBuilder.Append("long");
+				break;
+			case JTypeType.Object:
+				stringBuilder.Append(ObjectType);
+				break;
+			case JTypeType.Short:
+				stringBuilder.Append("short");
+				break;
+			case JTypeType.Boolean:
+				stringBuilder.Append("boolean");
+				break;
+			case JTypeType.Method:
+				// TODO
+				stringBuilder.Append($"Function<{ReturnType.ToString()}, ...>");
+				break;
+			default:
+				stringBuilder.Append("Object");
+				break;
+		}
+
+
+		for (ushort i = 0; i < ArrayDimension; i++)
+			stringBuilder.Append("[]");
+
+		return stringBuilder.ToString();
+	}
+
+	// cleans the type path, for example java/lang/object -> object or net/example/com/SomeType -> SomeType
+	// subclasses 'Type$SubType' will be cleaned to 'Type.SubType'
+	public static string ShortenTypeName(string typePath)
+	{
+		int last_path_sep = typePath.LastIndexOf('/');
+		if (last_path_sep != -1)
+		{
+			typePath = typePath.Substring(last_path_sep + 1);
+		}
+		return typePath.Replace('$', '.');
+	}
 
 }
 
@@ -302,9 +474,6 @@ public enum ConstantType
 	//Package
 
 }
-
-
-
 
 public class Constant
 {
@@ -343,8 +512,8 @@ public class Constant
 public struct Attribute
 {
 	public AttributeType Type;
-	public string Name;
 	public ushort NameIndex;
+	public string Name;
 
 	// for custom defined attributes
 	public byte[]? _data;
@@ -354,14 +523,18 @@ public class Field
 {
 	public FieldAccessFlags AccessFlags;
 	public ushort NameIndex;
+	public string? Name;
 	public ushort DescriptorIndex;
+	public JType ValueType;
 	public Attribute[]? Attributes;
 }
 public class Method
 {
 	public MethodAccessFlags AccessFlags;
 	public ushort NameIndex;
+	public string? Name;
 	public ushort DescriptorIndex;
+	public JType MethodType;
 	public Attribute[]? Attributes;
 }
 
@@ -384,13 +557,13 @@ public class Disassembly
 	public Method[]? Methods;
 	public Attribute[]? Attributes;
 
+	// constant index X (X for the class file) is Constant[ConstantIndexRoutingTable[X]]
+	public ushort[]? ConstantIndexRoutingTable;
+
 	public Disassembly()
 	{
 		Constants = new Constant[0];
 	}
-
-	// constant index X (X for the class file) is Constant[ConstantIndexRoutingTable[X]]
-	public ushort[]? ConstantIndexRoutingTable;
 
 	public static string DecryptType(string type_desc)
 	{
@@ -425,7 +598,37 @@ public class Disassembly
 	{
 		StringBuilder builder = new(4096);
 
+		string class_name = JType.ShortenTypeName(Constants[ThisClass - 1].String);
+		string super_name = JType.ShortenTypeName(Constants[SuperClass - 1].String);
+
 		builder.Append("class ");
+		builder.Append(class_name).Append(' ');
+
+		if (super_name != "Object")
+		{
+			builder.Append("extends ");
+			builder.Append(super_name).Append(' ');
+		}
+
+		builder.Append("{\n");
+
+		foreach (Field field in Fields)
+		{
+			// TODO: annotations
+			AccessFlagsUtil.ToString((string s) => builder.Append(s).Append(' '), field.AccessFlags);
+			builder.Append(JType.ShortenTypeName(field.ValueType.ToString())).Append(' ');
+			builder.Append(field.Name).Append(";\n");
+		}
+
+		foreach (Method method in Methods)
+		{
+			// TODO: annotations
+			AccessFlagsUtil.ToString((string s) => builder.Append(s).Append(' '), method.AccessFlags);
+			builder.Append(JType.ShortenTypeName(method.MethodType.ToString())).Append(' ');
+			builder.Append(method.Name).Append(";\n");
+		}
+
+		builder.Append("}");
 
 		return builder.ToString();
 	}
@@ -639,6 +842,27 @@ public class Disassembly
 		return errors.ToArray();
 	}
 
+	public void PostProcess()
+	{
+		SetupAttributes();
+
+		if (Fields is not null)
+		{
+			foreach (Field field in Fields)
+			{
+				SetupField(field);
+			}
+		}
+
+		if (Methods is not null)
+		{
+			foreach (Method method in Methods)
+			{
+				SetupMethod(method);
+			}
+		}
+	}
+
 	private bool IsConstantOfType(ushort index, ConstantType type)
 	{
 		// the class constant table indices start at 1
@@ -653,16 +877,38 @@ public class Disassembly
 		return name != "<init>" && name != "<clinit>";
 	}
 
+	private void SetupField(Field field)
+	{
+		// TODO: check for errors/out of range indices
+		field.Name = Constants[field.NameIndex - 1].String;
+		field.ValueType = new JType(Constants[field.DescriptorIndex - 1].String);
+	}
+
+	private void SetupMethod(Method method)
+	{
+		// TODO: check for errors/out of range indices
+		method.Name = Constants[method.NameIndex - 1].String;
+		method.MethodType = new JType(Constants[method.DescriptorIndex - 1].String);
+	}
+
 	private void LoadAttributes(Attribute[] attrs)
 	{
 		for (int i = 0; i < attrs.Length; i++)
 		{
 			// TODO: check the name index
 			attrs[i].Name = Constants[attrs[i].NameIndex - 1].String;
+			if (sAttributeTypeNames.TryGetValue(attrs[i].Name, out AttributeType value))
+			{
+				attrs[i].Type = value;
+			}
+			else
+			{
+				attrs[i].Type = AttributeType.UserDefined;
+			}
 		}
 	}
 
-	public void SetupAttributes()
+	private void SetupAttributes()
 	{
 		if (Fields is not null)
 		{
@@ -685,6 +931,45 @@ public class Disassembly
 		}
 	}
 
+	private static Dictionary<string, AttributeType> GetAttributeTypeNames()
+	{
+		Dictionary<string, AttributeType> dict = new();
+		string[] Names =
+		[
+		"ConstantValue",
+			"Code",
+			"StackMapTable",
+			"Exceptions",
+			"BootstrapMethods",
+			"InnerClasses",
+			"EnclosingMethod",
+			"Synthetic",
+			"Signature",
+			"RuntimeVisibleAnnotations",
+			"RuntimeInvisibleAnnotations",
+			"RuntimeVisibleParameterAnnotations",
+			"RuntimeInvisibleParameterAnnotations",
+			"RuntimeVisibleTypeAnnotations",
+			"RuntimeInvisibleTypeAnnotations",
+			"AnnotationDefault",
+			"MethodParameters",
+			"SourceFile",
+			"SourceDebugExtension",
+			"LineNumberTable",
+			"LocalVariableTable",
+			"LocalVariableTypeTable",
+			"Deprecated"
+		];
+
+		for (int i = 0; i < Names.Length; i++)
+		{
+			dict[Names[i]] = (AttributeType)(i + 1);
+		}
+
+		return dict;
+	}
+
+	private static readonly Dictionary<string, AttributeType> sAttributeTypeNames = GetAttributeTypeNames();
 }
 
 static public class JDisassembler
@@ -992,7 +1277,7 @@ static public class JDisassembler
 			disassembly.Methods[i] = reader.ReadMethod();
 		}
 
-		disassembly.SetupAttributes();
+
 
 		disassembly.Attributes = new Attribute[reader.ReadU16BE()];
 
@@ -1003,6 +1288,10 @@ static public class JDisassembler
 			disassembly.Attributes[i] = attr;
 			Console.WriteLine($"attribute \"{attr.Name}\": {attr._data.Length} bytes");
 		}
+
+		disassembly.PostProcess();
+		string text = disassembly.GenerateSource();
+		File.WriteAllText("output.java", text);
 
 		return string.Empty;
 	}
