@@ -225,11 +225,11 @@ public static class AccessFlagsUtil
 
 public class JType
 {
-	JTypeType Type;
-	ushort ArrayDimension = 0;
-	string ObjectType = "";
-	JType[]? MethodParameters;
-	JType? ReturnType;
+	public JTypeType Type;
+	public ushort ArrayDimension = 0;
+	public string ObjectType = "";
+	public JType[]? MethodParameters;
+	public JType? ReturnType;
 
 	public uint ReadLength { get; init; }
 
@@ -326,14 +326,16 @@ public class JType
 			// method
 			case '(':
 			{
+				Type = JTypeType.Method;
+
 				int end_para = encoded_type.IndexOf(')', 1);
 				if (end_para == -1)
 				{
 					throw new InvalidDataException($"Ill-Formed Method JType: \"{encoded_type}\"");
 				}
 
-
-				string parameters_typing = encoded_type.Substring(1, end_para);
+				// check if the parameters are empty (e.g. '()V')
+				string parameters_typing = end_para == 1 ? "" : encoded_type.Substring(1, end_para - 1);
 				string return_type = encoded_type.Substring(end_para + 1);
 
 				// the return_type read length might vary for it's just the rest of the string
@@ -356,7 +358,7 @@ public class JType
 
 				List<JType> parameters = new(8);
 
-				for (uint i = 0U; i < parameters_typing.Length; i++)
+				for (uint i = 0U; i < parameters_typing.Length;)
 				{
 					// TODO: CATCH EXCEPTIONS FOR MORE DETAILS
 					JType type = new(parameters_typing.Substring((int)i));
@@ -624,8 +626,36 @@ public class Disassembly
 		{
 			// TODO: annotations
 			AccessFlagsUtil.ToString((string s) => builder.Append(s).Append(' '), method.AccessFlags);
-			builder.Append(JType.ShortenTypeName(method.MethodType.ToString())).Append(' ');
-			builder.Append(method.Name).Append(";\n");
+			
+
+			// name
+			if (method.Name == "<init>")
+			{
+				// no return for constructor
+				builder.Append(class_name);
+			}
+			else
+			{
+				// return
+				builder.Append(JType.ShortenTypeName(method.MethodType.ReturnType.ToString())).Append(' ');
+				builder.Append(method.Name.Replace('$', '_'));
+			}
+			// parameters
+			builder.Append('(');
+
+			for (int i = 0; i < method.MethodType.MethodParameters.Length; i++)
+			{
+				JType method_param = method.MethodType.MethodParameters[i];
+				if (i > 0)
+				{
+					builder.Append(", ");
+				}
+
+				builder.Append(JType.ShortenTypeName(method_param.ToString()));
+			}
+
+			builder.Append(')').Append(";\n");
+
 		}
 
 		builder.Append("}");
