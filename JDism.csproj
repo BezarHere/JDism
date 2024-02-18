@@ -21,4 +21,10 @@
 	  <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
 	</PropertyGroup>
 
+	<ItemGroup>
+	  <Reference Include="ColussomLib">
+	    <HintPath>libs\ColussomLib.dll</HintPath>
+	  </Reference>
+	</ItemGroup>
+
 </Project>
