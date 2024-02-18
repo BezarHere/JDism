@@ -1,12 +1,6 @@
 ﻿using System.Diagnostics;
-using System;
-using System.Reflection;
-using System.Runtime;
-using System.Runtime.CompilerServices;
 using System.Text;
-using System.Reflection.Emit;
-using System.ComponentModel;
-using System.Runtime.InteropServices;
+using Colussom;
 
 namespace JDism;
 
@@ -849,54 +843,6 @@ public struct ConstantError(ushort index, string msg = "")
 	public ushort Index = index;
 	public string Message = msg;
 }
-// BIG ENDIAN
-internal class ByteReader
-{
-
-	public ByteReader(byte[] data)
-	{
-		_data = data;
-		Index = 0;
-	}
-
-	public void Read(byte[] bytes)
-	{
-		Read(bytes, 0, bytes.Length);
-	}
-
-	public void Read(byte[] bytes, int index, int len)
-	{
-		Array.Copy(_data, Index, bytes, index, len);
-		Index += index;
-	}
-
-	public byte Read8()
-	{
-		return _data[Index++];
-	}
-
-	public ushort Read16()
-	{
-		return (ushort)((_data[Index++] << 8) | _data[Index++]);
-	}
-
-	public uint Read32()
-	{
-		return (uint)((_data[Index++] << 24) | (_data[Index++] << 16) | (_data[Index++] << 8) | _data[Index++]);
-	}
-
-	public ulong Read64()
-	{
-		return (uint)(
-			(_data[Index++] << 56) | (_data[Index++] << 48) |
-			(_data[Index++] << 48) | (_data[Index++] << 32) |
-			(_data[Index++] << 24) | (_data[Index++] << 16) |
-			(_data[Index++] << 8) | _data[Index++]);
-	}
-
-	public int Index { get; private set; }
-	private byte[] _data;
-}
 
 public class Disassembly
 {
@@ -1383,37 +1329,41 @@ public class Disassembly
 
 	private void LoadCodeInfo(Attribute attribute)
 	{
-		ByteReader reader = new(attribute._data);
+		ByteReader reader = new(attribute._data, 0, Endianness.Big);
 
-		attribute.Code.MaxStack = reader.Read16();
-		attribute.Code.MaxLocals = reader.Read16();
+		attribute.Code.MaxStack = reader.ReadUShort();
+		attribute.Code.MaxLocals = reader.ReadUShort();
 
-		uint code_len = reader.Read32();
+		int code_len = reader.ReadInt();
+		if (code_len <= 0)
+		{
+			throw new InvalidDataException($"code length can't be less or equal to zero: {code_len}");
+		}
 
-		// copy byte code
-		attribute.Code.ByteCode = new byte[code_len];
-		reader.Read(attribute.Code.ByteCode);
+		if (reader.SpaceLeft < code_len)
+		{
+			throw new InvalidDataException();
+		}
+
+		attribute.Code.ByteCode = reader.Read(code_len);
 
 
-		uint exception_table_len = reader.Read32();
-		if (exception_table_len > 16)
-			exception_table_len = 16;
+		ushort exception_table_len = reader.ReadUShort();
 		attribute.Code.ExceptionRecords = new Attribute.ExceptionRecord[exception_table_len];
-
 
 		Attribute.ExceptionRecord ReadExceptionRecord()
 		{
-			return new(reader.Read16(), reader.Read16(), reader.Read16(), reader.Read16());
+			return new(reader.ReadUShort(), reader.ReadUShort(), reader.ReadUShort(), reader.ReadUShort());
 		}
 
 		for (uint i = 0; i < exception_table_len; i++)
 		{
-			//attribute.Code.ExceptionRecords[i] = ReadExceptionRecord();
+			attribute.Code.ExceptionRecords[i] = ReadExceptionRecord();
 		}
 
-		//uint subattrs_count = reader.Read32();
+		ushort subattrs_count = reader.ReadUShort();
 
-		//attribute.Code.Attributes = new Attribute[subattrs_count];
+		attribute.Code.Attributes = new Attribute[subattrs_count];
 
 		// TODO: load the sub attributes
 
@@ -1464,7 +1414,7 @@ public class Disassembly
 					throw new InvalidDataException($"signature attribute should have 2 bytes of data, but it has {attribute._data.Length}");
 				}
 
-				attribute.Signature.Index = reader.Read16();
+				attribute.Signature.Index = reader.ReadUShort();
 
 				attribute.Signature.Value = Constants[attribute.Signature.Index - 1].String;
 			}
@@ -1539,7 +1489,7 @@ public class Disassembly
 static public class JDisassembler
 {
 
-	private class JReader
+	public class JReader
 	{
 		public JReader(BinaryReader br)
 		{
@@ -1878,5 +1828,10 @@ static public class JDisassembler
 
 		return string.Empty;
 	}
+
+}
+
+static public class JSL
+{
 
 }
