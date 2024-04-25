@@ -329,7 +329,7 @@ public enum ClassAccessFlags
 }
 
 
-public static class AccessFlagsUtil
+public static class AccessFlagsUtility
 {
 
 	public static void ToString(Action<string> loader, FieldAccessFlags accessFlags)
@@ -442,34 +442,20 @@ public class JType
 	public JType ReturnType;
 	public JType[] Generics = [];
 
-	public uint ReadLength { get; init; }
 
 	public JType()
 	{
 		Type = JTypeType.Object;
 	}
 
-	public JType(string encoded_type)
+	public JType(JStringReader reader)
 	{
-		if (encoded_type == "") return;
-
-		int strlen = encoded_type.Length;
+		if (reader.EOF) return;
 
 		// check for arrays
-		ArrayDimension = 0;
-		for (int i = 0; i < strlen; i++)
-		{
-			if (encoded_type[i] != '[')
-				break;
-			ArrayDimension++;
-		}
+		ArrayDimension = (ushort)reader.SkipCount('[');
 
-		// removed prefixed array decorator "[[["
-		encoded_type = encoded_type.Substring(ArrayDimension);
-
-		ReadLength = ArrayDimension + 1U;
-
-		switch (encoded_type[0])
+		switch (reader.Read())
 		{
 			case 'V':
 			{
@@ -521,16 +507,14 @@ public class JType
 			{
 				Type = JTypeType.Object;
 
-				int semicolon_pos = encoded_type.IndexOf(';');
+				int semicolon_pos = reader.IndexOf(';');
 				if (semicolon_pos == -1)
 				{
-					throw new InvalidDataException($"Object Type Does Not have The Terminating Semicolon: \"{encoded_type}\"");
+					throw new InvalidDataException($"Object Type Does Not have The Terminating Semicolon: \"{reader}\"");
 				}
 
-				ObjectType = encoded_type.Substring(1, semicolon_pos - 1);
-
-				// The prefixed 'L' and array decorators are handled before the switch
-				ReadLength += (uint)ObjectType.Length + 1U;
+				ObjectType = reader.ReadUntil(c => c == ';');
+				reader.Skip(); // skip ';'
 
 				break;
 			}
@@ -538,45 +522,37 @@ public class JType
 			case '(':
 			{
 				Type = JTypeType.Method;
+				reader.Skip(); // skip '('
 
-				int end_para = encoded_type.IndexOf(')', 1);
+				int end_para = reader.IndexOf(')');
+				// no closing parenthesis
 				if (end_para == -1)
 				{
-					throw new InvalidDataException($"Ill-Formed Method JType: \"{encoded_type}\"");
+					throw new InvalidDataException($"Ill-Formed Method JType: \"{reader}\"");
 				}
 
-				// check if the parameters are empty (e.g. '()V')
-				string parameters_typing = end_para == 1 ? "" : encoded_type.Substring(1, end_para - 1);
-				string return_type = encoded_type.Substring(end_para + 1);
 
-				// the return_type read length might vary for it's just the rest of the string
-				// and in need for parsing
-				ReadLength += 2U;
+				// read every thing between the '(' & ')'
+				string parameters_typing = reader.ReadUntil(c => c == ')');
+				reader.Skip(); // skip ')'
 
 				try
 				{
-					ReturnType = new JType(return_type);
+					ReturnType = new JType(reader);
 				}
 				catch (Exception)
 				{
-					Console.WriteLine("Error While Parsing Return Type For Method JType:");
-					Console.WriteLine($"Encoded type: \"{encoded_type}\"");
-					Console.WriteLine($"Return type: \"{return_type}\"");
+					Console.WriteLine($"Error While Parsing Return Type For Method JType: \"{reader}\"");
 					throw;
 				}
 
-				ReadLength += ReturnType.ReadLength;
-
 				List<JType> parameters = new(8);
+				JStringReader parameters_reader = new(parameters_typing);
 
-				for (uint i = 0U; i < parameters_typing.Length;)
+				while (parameters_reader) // not EOF
 				{
 					// TODO: CATCH EXCEPTIONS FOR MORE DETAILS
-					JType type = new(parameters_typing.Substring((int)i));
-
-					// only for parsing, read length already adjusted after parameters_typing is defined
-					i += type.ReadLength;
-					ReadLength += type.ReadLength;
+					JType type = new(parameters_reader);
 
 					parameters.Add(type);
 				}
@@ -587,39 +563,31 @@ public class JType
 			}
 			default:
 			{
-				throw new InvalidDataException($"Invalid Encoding For JType: \"{encoded_type}\"");
+				throw new InvalidDataException($"Invalid Encoding For JType: \"{reader}\"");
 			}
 		}
 
-		// shouldn't be bigger then the encoded length
-		if (ReadLength >= encoded_type.Length)
+		if (reader.Peek() == '<')
 		{
-			return;
-		}
+			reader.Skip(); // skips '<'
 
-		encoded_type = encoded_type.Substring((int)ReadLength);
-
-		if (!string.IsNullOrEmpty(encoded_type) && encoded_type[0] == '<')
-		{
-			int end_arrow = encoded_type.IndexOf('>', 1);
+			int end_arrow = reader.IndexOf('>');
 			if (end_arrow == -1)
 			{
-				throw new InvalidDataException($"Invalid generics {encoded_type}");
+				throw new InvalidDataException($"Invalid generics {reader}");
 			}
 
-			string generics_raw = end_arrow == 1 ? "" : encoded_type.Substring(1, end_arrow - 1);
+			string generics_raw = reader.ReadUntil(c => c == '>');
+			reader.Skip(); // skips '>'
 
-			ReadLength += (uint)generics_raw.Length + 2u;
 
 			List<JType> generics = new(8);
 
-			for (uint i = 0U; i < generics_raw.Length;)
+			JStringReader generics_reader = new(generics_raw);
+			while (generics_reader) // not EOF
 			{
 				// TODO: CATCH EXCEPTIONS FOR MORE DETAILS
-				JType type = new(generics_raw.Substring((int)i));
-
-				// only for parsing, read length already adjusted after parameters_typing is defined
-				i += type.ReadLength;
+				JType type = new(generics_reader);
 
 				generics.Add(type);
 			}
@@ -635,6 +603,7 @@ public class JType
 		ArrayDimension = arr_d;
 		ObjectType = obj_type;
 	}
+
 
 	public override string ToString()
 	{
@@ -1228,7 +1197,8 @@ public struct Instruction
 		return new();
 	}
 
-	public override string ToString() {
+	public override string ToString()
+	{
 		string s = InstructionName(OpCode);
 		foreach (byte b in Data)
 		{
@@ -1314,7 +1284,7 @@ public class Disassembly
 				if (field.Attributes is not null)
 					builder.Append(AttributesToAnnotations(field.Attributes));
 
-				AccessFlagsUtil.ToString((string s) => builder.Append(s).Append(' '), field.AccessFlags);
+				AccessFlagsUtility.ToString((string s) => builder.Append(s).Append(' '), field.AccessFlags);
 				builder.Append(field.ValueType is not null ? JType.ShortenTypeName(field.ValueType.ToString()) : "NULL").Append(' ');
 				builder.Append(field.Name).Append(";\n");
 			}
@@ -1328,7 +1298,7 @@ public class Disassembly
 					builder.Append(AttributesToAnnotations(method.Attributes));
 
 				// TODO: annotations
-				AccessFlagsUtil.ToString((string s) => builder.Append(s).Append(' '), method.AccessFlags);
+				AccessFlagsUtility.ToString((string s) => builder.Append(s).Append(' '), method.AccessFlags);
 
 
 				// name
@@ -1712,17 +1682,19 @@ public class Disassembly
 	{
 		// TODO: check for errors/out of range indices
 		field.Name = Constants[field.NameIndex - 1].String;
-		field.ValueType = new JType(Constants[field.DescriptorIndex - 1].String);
+		JStringReader reader = new(Constants[field.DescriptorIndex - 1].String);
+		field.ValueType = new JType(reader);
 	}
 
 	private void SetupMethod(Method method)
 	{
 		// TODO: check for errors/out of range indices
 		method.Name = Constants[method.NameIndex - 1].String;
-		method.MethodType = new JType(Constants[method.DescriptorIndex - 1].String);
+		JStringReader reader = new(Constants[method.NameIndex - 1].String);
+		method.MethodType = new JType(reader);
 	}
 
-	private void LoadCodeInfo(Attribute attribute)
+	private static void LoadCodeInfo(Attribute attribute)
 	{
 		ByteReader reader = new(attribute._data, 0, Endianness.Big);
 
@@ -2098,6 +2070,170 @@ public class JReader
 	}
 
 	public BinaryReader Reader { get; init; }
+}
+
+public class JStringReader
+{
+	public JStringReader(string str, int start = 0)
+	{
+		String = str;
+		Index = 0;
+	}
+
+	public void Skip(int count = 1)
+	{
+		Index += count;
+	}
+
+	public int Peek()
+	{
+		if (EOF)
+			return -1;
+		return String[Index];
+	}
+
+	public int Read()
+	{
+		if (EOF)
+			return -1;
+		return String[Index++];
+	}
+
+	public int Read(char[] buffer, int write_index, int count)
+	{
+		if (EOF)
+			return 0;
+
+		char[] chars = String.ToCharArray(Index, Math.Min(SpaceLeft, count));
+		Array.Copy(chars, 0, buffer, write_index, chars.Length);
+		Index += chars.Length;
+		return chars.Length;
+	}
+
+	public string Read(int count)
+	{
+		if (EOF)
+			return "";
+		count = Math.Min(SpaceLeft, count);
+		Index += count;
+		return String.Substring(Index - count, count);
+	}
+
+	public int IndexOf(char value)
+	{
+		return String.IndexOf(value, Index);
+	}
+
+	public int IndexOf(string value)
+	{
+		return String.IndexOf(value, Index);
+	}
+
+	public int LastIndexOf(char value)
+	{
+		return String.LastIndexOf(value, Index);
+	}
+
+	public int LastIndexOf(string value)
+	{
+		return String.LastIndexOf(value, Index);
+	}
+
+	public int GoToIndexOf(char value)
+	{
+		int index = String.IndexOf(value, Index);
+		if (index == -1)
+			Index = String.Length;
+		Index = index;
+		return Index;
+	}
+
+	public int GoToIndexOf(string value)
+	{
+		int index = String.IndexOf(value, Index);
+		if (index == -1)
+			Index = String.Length;
+		Index = index;
+		return Index;
+	}
+
+	public int GoToLastIndexOf(char value)
+	{
+		int index = String.LastIndexOf(value, Index);
+		if (index == -1)
+			Index = String.Length;
+		Index = index;
+		return Index;
+	}
+
+	public int GoToLastIndexOf(string value)
+	{
+		int index = String.LastIndexOf(value, Index);
+		if (index == -1)
+			Index = String.Length;
+		Index = index;
+		return Index; ;
+	}
+
+	/// <summary>
+	/// skips all repeats of 'value'
+	/// </summary>
+	/// <param name="character">the character to be skipped</param>
+	/// <returns>the number of characters skipped</returns>
+	/// <example> in the string 'aaaab', the return value for SkipCount('a') will be 4 and the read position will be at the 'b' </example>
+	public int SkipCount(char character)
+	{
+		if (EOF)
+			return 0;
+		int count = 0;
+		while (String[Index + count] == character)
+		{
+			count++;
+		}
+		Index += count;
+		return count;
+	}
+
+	/// <summary>
+	/// reads until the predicate is satisfied, stops the reader at the character satisfying the predicate
+	/// </summary>
+	/// <param name="predicate"></param>
+	/// <returns>the read string</returns>
+	public string ReadUntil(Predicate<char> predicate)
+	{
+		int count = 0;
+		while (!EOF)
+		{
+			if (predicate(String[Index + count]))
+				break;
+		}
+		return Read(count);
+	}
+
+	public string String { get; init; }
+	private int _index;
+	public int Index
+	{
+		get => _index;
+		set
+		{
+			if (value < 0)
+				throw new ArgumentOutOfRangeException(nameof(value), "negative index");
+
+			if (value > String.Length)
+				throw new ArgumentOutOfRangeException(nameof(value), "overflow index");
+
+			_index = value;
+		}
+	}
+
+	public static implicit operator bool(JStringReader reader)
+	{
+		return !reader.EOF;
+	}
+
+	public int SpaceLeft { get => String.Length - Index; }
+	public bool EOF { get => String.Length == Index; }
 }
 
 static public class JDisassembler
