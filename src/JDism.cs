@@ -6,214 +6,6 @@ using Colussom;
 
 namespace JDism;
 
-public enum VMOpCode : byte
-{
-	Nop = 0,
-	AconstNull,
-	IconstM1,
-	Iconst0,
-	Iconst1,
-	Iconst2,
-	Iconst3,
-	Iconst4,
-	Iconst5,
-	Lconst0,
-	Lconst1,
-	Fconst0,
-	Fconst1,
-	Fconst2,
-	Dconst0,
-	Dconst1,
-	Bipush,
-	Sipush,
-	Ldc,
-	LdcW,
-	Ldc2W,
-	Iload,
-	Lload,
-	Fload,
-	Dload,
-	Aload,
-	Iload0,
-	Iload1,
-	Iload2,
-	Iload3,
-	Lload0,
-	Lload1,
-	Lload2,
-	Lload3,
-	Fload0,
-	Fload1,
-	Fload2,
-	Fload3,
-	Dload0,
-	Dload1,
-	Dload2,
-	Dload3,
-	Aload0,
-	Aload1,
-	Aload2,
-	Aload3,
-	Iaload,
-	Laload,
-	Faload,
-	Daload,
-	Aaload,
-	Baload,
-	Caload,
-	Saload,
-	Istore,
-	Lstore,
-	Fstore,
-	Dstore,
-	Astore,
-	Istore0,
-	Istore1,
-	Istore2,
-	Istore3,
-	Lstore0,
-	Lstore1,
-	Lstore2,
-	Lstore3,
-	Fstore0,
-	Fstore1,
-	Fstore2,
-	Fstore3,
-	Dstore0,
-	Dstore1,
-	Dstore2,
-	Dstore3,
-	Astore0,
-	Astore1,
-	Astore2,
-	Astore3,
-	Iastore,
-	Lastore,
-	Fastore,
-	Dastore,
-	Aastore,
-	Bastore,
-	Castore,
-	Sastore,
-	Pop,
-	Pop2,
-	Dup,
-	DupX1,
-	DupX2,
-	Dup2,
-	Dup2X1,
-	Dup2X2,
-	Swap,
-	Iadd,
-	Ladd,
-	Fadd,
-	Dadd,
-	Isub,
-	Lsub,
-	Fsub,
-	Dsub,
-	Imul,
-	Lmul,
-	Fmul,
-	Dmul,
-	Idiv,
-	Ldiv,
-	Fdiv,
-	Ddiv,
-	Irem,
-	Lrem,
-	Frem,
-	Drem,
-	Ineg,
-	Lneg,
-	Fneg,
-	Dneg,
-	Ishl,
-	Lshl,
-	Ishr,
-	Lshr,
-	Iushr,
-	Lushr,
-	Iand,
-	Land,
-	Ior,
-	Lor,
-	Ixor,
-	Lxor,
-	Iinc,
-	I2l,
-	I2f,
-	I2d,
-	L2i,
-	L2f,
-	L2d,
-	F2i,
-	F2l,
-	F2d,
-	D2i,
-	D2l,
-	D2f,
-	I2b,
-	I2c,
-	I2s,
-	Lcmp,
-	Fcmpl,
-	Fcmpg,
-	Dcmpl,
-	Dcmpg,
-	Ifeq,
-	Ifne,
-	Iflt,
-	Ifge,
-	Ifgt,
-	Ifle,
-	IfIcmpeq,
-	IfIcmpne,
-	IfIcmplt,
-	IfIcmpge,
-	IfIcmpgt,
-	IfIcmple,
-	IfAcmpeq,
-	IfAcmpne,
-	Goto,
-	Jsr,
-	Ret,
-	Tableswitch,
-	Lookupswitch,
-	Ireturn,
-	Lreturn,
-	Freturn,
-	Dreturn,
-	Areturn,
-	Return,
-	Getstatic,
-	Putstatic,
-	Getfield,
-	Putfield,
-	Invokevirtual,
-	Invokespecial,
-	Invokestatic,
-	Invokeinterface,
-	Invokedynamic,
-	New,
-	Newarray,
-	Anewarray,
-	Arraylength,
-	Athrow,
-	Checkcast,
-	Instanceof,
-	Monitorenter,
-	Monitorexit,
-	Wide,
-	Multianewarray,
-	Ifnull,
-	Ifnonnull,
-	GotoW,
-	JsrW,
-
-	_Max,
-	_Invalid = 0xff,
-}
 
 public enum MethodReferenceKind : byte
 {
@@ -452,6 +244,13 @@ public class JType
 	{
 		if (reader.EOF) return;
 
+		if (reader.String.StartsWith("<init>") || reader.String.StartsWith("<cinit>"))
+		{
+			Type = JTypeType.Method;
+			Console.WriteLine($"found a special function: {reader.String}");
+			return;
+		}
+
 		// check for arrays
 		ArrayDimension = (ushort)reader.SkipCount('[');
 
@@ -510,11 +309,13 @@ public class JType
 				int semicolon_pos = reader.IndexOf(';');
 				if (semicolon_pos == -1)
 				{
-					throw new InvalidDataException($"Object Type Does Not have The Terminating Semicolon: \"{reader}\"");
+					throw new InvalidDataException($"\nObject Type Does Not have The Terminating Semicolon: \"{reader}\"");
 				}
 
 				ObjectType = reader.ReadUntil(c => c == ';');
 				reader.Skip(); // skip ';'
+
+
 
 				break;
 			}
@@ -522,7 +323,6 @@ public class JType
 			case '(':
 			{
 				Type = JTypeType.Method;
-				reader.Skip(); // skip '('
 
 				int end_para = reader.IndexOf(')');
 				// no closing parenthesis
@@ -607,7 +407,7 @@ public class JType
 
 	public override string ToString()
 	{
-		StringBuilder stringBuilder = new(ArrayDimension * 2 + 2);
+		StringBuilder stringBuilder = new(8);
 
 		switch (Type)
 		{
@@ -633,7 +433,7 @@ public class JType
 				stringBuilder.Append("long");
 				break;
 			case JTypeType.Object:
-				stringBuilder.Append(ObjectType);
+				stringBuilder.Append(GetSimplifiedObjectType());
 				break;
 			case JTypeType.Short:
 				stringBuilder.Append("short");
@@ -671,16 +471,35 @@ public class JType
 		return stringBuilder.ToString();
 	}
 
+	// for object/ref types, returns the package that they belong to
+	// if the type is not an object/ref, an empty string will be returned
+	public string GetPackageName()
+	{
+		if (this.Type == JTypeType.Object)
+		{
+			return ObjectType.Substring(0, ObjectType.LastIndexOf('/'));
+		}
+		return string.Empty;
+	}
+
+	// for object/ref types, returns the package that they belong to
+	// if the type is not an object/ref, an empty string will be returned
+	public string GetObjectName()
+	{
+		if (this.Type == JTypeType.Object)
+		{
+			return ObjectType.Substring(ObjectType.LastIndexOf('/') + 1).Replace('$', '.');
+		}
+		return string.Empty;
+	}
+
 	// cleans the type path, for example java/lang/object -> object or net/example/com/SomeType -> SomeType
 	// subclasses 'Type$SubType' will be cleaned to 'Type.SubType'
-	public static string ShortenTypeName(string typePath)
+	public string GetSimplifiedObjectType()
 	{
-		int last_path_sep = typePath.LastIndexOf('/');
-		if (last_path_sep != -1)
-		{
-			typePath = typePath.Substring(last_path_sep + 1);
-		}
-		return typePath.Replace('$', '.');
+		if (GetPackageName().StartsWith("java/"))
+			return GetObjectName();
+		return ObjectType;
 	}
 
 }
@@ -820,395 +639,6 @@ public struct ConstantError(ushort index, string msg = "")
 	public string Message = msg;
 }
 
-public struct Instruction
-{
-	public readonly VMOpCode OpCode;
-
-	private readonly byte[] Data;
-
-	public Instruction(VMOpCode OpCode, byte[] data)
-	{
-		this.OpCode = OpCode;
-		this.Data = data;
-	}
-
-	public Instruction(VMOpCode OpCode)
-	{
-		this.OpCode = OpCode;
-		this.Data = [];
-	}
-
-	public Instruction()
-	{
-		this.OpCode = VMOpCode._Invalid;
-	}
-
-	public static string InstructionName(VMOpCode code) => Names[(int)code];
-
-	// in bytes
-	// if negative, the instruction length varies.
-	// the abs(InstructionLength(X)) is the minimum bytes to load the instruction
-	static public int InstructionLength(VMOpCode code)
-	{
-		switch (code)
-		{
-			case VMOpCode.Bipush:
-			case VMOpCode.Ldc:
-			case VMOpCode.Iload:
-			case VMOpCode.Lload:
-			case VMOpCode.Fload:
-			case VMOpCode.Dload:
-			case VMOpCode.Aload:
-			case VMOpCode.Istore:
-			case VMOpCode.Lstore:
-			case VMOpCode.Fstore:
-			case VMOpCode.Dstore:
-			case VMOpCode.Astore:
-			case VMOpCode.Newarray:
-			case VMOpCode.Ret:
-				return 1;
-			case VMOpCode.Sipush:
-			case VMOpCode.LdcW:
-			case VMOpCode.Ldc2W:
-			case VMOpCode.Iinc:
-			case VMOpCode.Ifeq:
-			case VMOpCode.Ifne:
-			case VMOpCode.Iflt:
-			case VMOpCode.Ifge:
-			case VMOpCode.Ifgt:
-			case VMOpCode.Ifle:
-			case VMOpCode.IfIcmpeq:
-			case VMOpCode.IfIcmpne:
-			case VMOpCode.IfIcmplt:
-			case VMOpCode.IfIcmpge:
-			case VMOpCode.IfIcmpgt:
-			case VMOpCode.IfIcmple:
-			case VMOpCode.IfAcmpeq:
-			case VMOpCode.IfAcmpne:
-			case VMOpCode.Goto:
-			case VMOpCode.Jsr:
-			case VMOpCode.Getstatic:
-			case VMOpCode.Putstatic:
-			case VMOpCode.Getfield:
-			case VMOpCode.Putfield:
-			case VMOpCode.Invokevirtual:
-			case VMOpCode.Invokespecial:
-			case VMOpCode.Invokestatic:
-			case VMOpCode.New:
-			case VMOpCode.Anewarray:
-			case VMOpCode.Checkcast:
-			case VMOpCode.Instanceof:
-			case VMOpCode.Ifnull:
-			case VMOpCode.Ifnonnull:
-				return 2;
-			case VMOpCode.Multianewarray:
-				return 3;
-			case VMOpCode.Invokeinterface:
-			case VMOpCode.Invokedynamic:
-			case VMOpCode.GotoW:
-			case VMOpCode.JsrW:
-				return 4;
-			case VMOpCode.Wide:
-				return -5; // -3?
-			case VMOpCode.Lookupswitch:
-				return -8;
-			case VMOpCode.Tableswitch:
-				return -16;
-			default:
-				return 0;
-		}
-	}
-
-	#region
-	private static readonly string[] Names = [
-		"nop",
-		"aconst_null",
-		"iconst_m1",
-		"iconst_0",
-		"iconst_1",
-		"iconst_2",
-		"iconst_3",
-		"iconst_4",
-		"iconst_5",
-		"lconst_0",
-		"lconst_1",
-		"fconst_0",
-		"fconst_1",
-		"fconst_2",
-		"dconst_0",
-		"dconst_1",
-		"bipush",
-		"sipush",
-		"ldc",
-		"ldc_w",
-		"ldc2_w",
-		"iload",
-		"lload",
-		"fload",
-		"dload",
-		"aload",
-		"iload_0",
-		"iload_1",
-		"iload_2",
-		"iload_3",
-		"lload_0",
-		"lload_1",
-		"lload_2",
-		"lload_3",
-		"fload_0",
-		"fload_1",
-		"fload_2",
-		"fload_3",
-		"dload_0",
-		"dload_1",
-		"dload_2",
-		"dload_3",
-		"aload_0",
-		"aload_1",
-		"aload_2",
-		"aload_3",
-		"iaload",
-		"laload",
-		"faload",
-		"daload",
-		"aaload",
-		"baload",
-		"caload",
-		"saload",
-		"istore",
-		"lstore",
-		"fstore",
-		"dstore",
-		"astore",
-		"istore_0",
-		"istore_1",
-		"istore_2",
-		"istore_3",
-		"lstore_0",
-		"lstore_1",
-		"lstore_2",
-		"lstore_3",
-		"fstore_0",
-		"fstore_1",
-		"fstore_2",
-		"fstore_3",
-		"dstore_0",
-		"dstore_1",
-		"dstore_2",
-		"dstore_3",
-		"astore_0",
-		"astore_1",
-		"astore_2",
-		"astore_3",
-		"iastore",
-		"lastore",
-		"fastore",
-		"dastore",
-		"aastore",
-		"bastore",
-		"castore",
-		"sastore",
-		"pop",
-		"pop2",
-		"dup",
-		"dup_x1",
-		"dup_x2",
-		"dup2",
-		"dup2_x1",
-		"dup2_x2",
-		"swap",
-		"iadd",
-		"ladd",
-		"fadd",
-		"dadd",
-		"isub",
-		"lsub",
-		"fsub",
-		"dsub",
-		"imul",
-		"lmul",
-		"fmul",
-		"dmul",
-		"idiv",
-		"ldiv",
-		"fdiv",
-		"ddiv",
-		"irem",
-		"lrem",
-		"frem",
-		"drem",
-		"ineg",
-		"lneg",
-		"fneg",
-		"dneg",
-		"ishl",
-		"lshl",
-		"ishr",
-		"lshr",
-		"iushr",
-		"lushr",
-		"iand",
-		"land",
-		"ior",
-		"lor",
-		"ixor",
-		"lxor",
-		"iinc",
-		"i2l",
-		"i2f",
-		"i2d",
-		"l2i",
-		"l2f",
-		"l2d",
-		"f2i",
-		"f2l",
-		"f2d",
-		"d2i",
-		"d2l",
-		"d2f",
-		"i2b",
-		"i2c",
-		"i2s",
-		"lcmp",
-		"fcmpl",
-		"fcmpg",
-		"dcmpl",
-		"dcmpg",
-		"ifeq",
-		"ifne",
-		"iflt",
-		"ifge",
-		"ifgt",
-		"ifle",
-		"if_icmpeq",
-		"if_icmpne",
-		"if_icmplt",
-		"if_icmpge",
-		"if_icmpgt",
-		"if_icmple",
-		"if_acmpeq",
-		"if_acmpne",
-		"goto",
-		"jsr",
-		"ret",
-		"tableswitch",
-		"lookupswitch",
-		"ireturn",
-		"lreturn",
-		"freturn",
-		"dreturn",
-		"areturn",
-		"return",
-		"getstatic",
-		"putstatic",
-		"getfield",
-		"putfield",
-		"invokevirtual",
-		"invokespecial",
-		"invokestatic",
-		"invokeinterface",
-		"invokedynamic",
-		"new",
-		"newarray",
-		"anewarray",
-		"arraylength",
-		"athrow",
-		"checkcast",
-		"instanceof",
-		"monitorenter",
-		"monitorexit",
-		"wide",
-		"multianewarray",
-		"ifnull",
-		"ifnonnull",
-		"goto_w",
-		"jsr_w"
-	];
-	#endregion
-
-	private static VMOpCode ReadType(ByteReader reader)
-	{
-		byte byte_type = reader.ReadByte();
-		if (byte_type >= (byte)VMOpCode._Max)
-		{
-			return VMOpCode._Invalid;
-		}
-
-		return (VMOpCode)byte_type;
-	}
-
-	private static Instruction ReadWide(ByteReader reader)
-	{
-		VMOpCode type = ReadType(reader);
-		if (type == VMOpCode._Invalid)
-		{
-			return new();
-		}
-
-		int length = InstructionLength(type);
-		if (length >= 0)
-		{
-			return new(type, reader.Read(length * 2));
-		}
-
-		return new();
-	}
-
-	public static Instruction Read(ByteReader reader)
-	{
-		VMOpCode type = ReadType(reader);
-		if (type == VMOpCode._Invalid)
-		{
-			return new();
-		}
-
-		int length = InstructionLength(type);
-		if (length >= 0)
-		{
-			return new(type, reader.Read(length));
-		}
-
-		switch (type)
-		{
-			case VMOpCode.Tableswitch:
-			{
-				// skip 4 bytes
-				reader.ReadInt();
-				Console.WriteLine($"encountred a table switch: {reader.ReadInt()}, {reader.ReadInt()}, {reader.ReadInt()}");
-				break;
-			}
-			case VMOpCode.Lookupswitch:
-			{
-				// skip 4 bytes
-				reader.ReadInt();
-				Console.WriteLine($"encountred a lookup switch: {reader.ReadInt()}, {reader.ReadInt()}, {reader.ReadInt()}");
-				break;
-			}
-			case VMOpCode.Wide:
-			{
-				return ReadWide(reader);
-			}
-			default:
-				Console.WriteLine($"couldn't read the instruction of type {type}, length = {length}");
-				break;
-		}
-
-
-		return new();
-	}
-
-	public override string ToString()
-	{
-		string s = InstructionName(OpCode);
-		foreach (byte b in Data)
-		{
-			s += $" 0x{b:X}";
-		}
-		return s;
-	}
-
-}
-
 public class Disassembly
 {
 	public ushort VersionMinor;
@@ -1227,7 +657,7 @@ public class Disassembly
 
 	public Disassembly()
 	{
-		Constants = new Constant[0];
+		Constants = [];
 	}
 
 	public static string DecryptType(string type_desc)
@@ -1263,8 +693,8 @@ public class Disassembly
 	{
 		StringBuilder builder = new(4096);
 
-		string class_name = JType.ShortenTypeName(Constants[ThisClass - 1].String);
-		string super_name = JType.ShortenTypeName(Constants[SuperClass - 1].String);
+		string class_name = Constants[ThisClass - 1].String;
+		string super_name = Constants[SuperClass - 1].String;
 
 		builder.Append("class ");
 		builder.Append(class_name).Append(' ');
@@ -1285,7 +715,7 @@ public class Disassembly
 					builder.Append(AttributesToAnnotations(field.Attributes));
 
 				AccessFlagsUtility.ToString((string s) => builder.Append(s).Append(' '), field.AccessFlags);
-				builder.Append(field.ValueType is not null ? JType.ShortenTypeName(field.ValueType.ToString()) : "NULL").Append(' ');
+				builder.Append(field.ValueType is not null ? field.ValueType.ToString() : "NULL").Append(' ');
 				builder.Append(field.Name).Append(";\n");
 			}
 		}
@@ -1315,7 +745,7 @@ public class Disassembly
 				else
 				{
 					// return
-					builder.Append(JType.ShortenTypeName(method.MethodType.ReturnType.ToString())).Append(' ');
+					builder.Append(method.MethodType.ReturnType.ToString()).Append(' ');
 					bool internal_name = method.Name.Contains('$');
 					if (internal_name)
 					{
@@ -1335,7 +765,7 @@ public class Disassembly
 						builder.Append(", ");
 					}
 
-					builder.Append(JType.ShortenTypeName(method_param.ToString()));
+					builder.Append(method_param.ToString());
 					builder.Append(' ');
 					builder.Append($"parameter_{i}");
 				}
@@ -1561,6 +991,8 @@ public class Disassembly
 
 	public void PostProcess()
 	{
+		PostProcessConstants();
+
 		SetupAttributes();
 
 		if (Fields is not null)
@@ -1576,6 +1008,54 @@ public class Disassembly
 			foreach (Method method in Methods)
 			{
 				SetupMethod(method);
+			}
+		}
+	}
+
+	public void PostProcessConstants()
+	{
+		for (uint i = 0; i < Constants.Length; i++)
+		{
+			Constant constant = Constants[i];
+			switch (constant.type)
+			{
+				case ConstantType.Integer:
+				{
+					constant.String = constant.IntegerValue.ToString();
+					break;
+				}
+				case ConstantType.Float:
+				{
+					constant.String = constant.FloatValue.ToString();
+					break;
+				}
+				case ConstantType.Long:
+				{
+					constant.String = constant.LongValue.ToString();
+					break;
+				}
+				case ConstantType.Double:
+				{
+					constant.String = constant.DoubleValue.ToString();
+					break;
+				}
+				case ConstantType.Class:
+				case ConstantType.FieldReference:
+				case ConstantType.MethodReference:
+				case ConstantType.InterfaceMethodReference:
+				case ConstantType.StringReference:
+				{
+					constant.String = Constants[constant.NameIndex - 1].String;
+					Console.WriteLine($"CONSTANT STRING: \"{constant.String}\"");
+					break;
+				}
+				case ConstantType.NameTypeDescriptor:
+				{
+					constant.String = $"{Constants[constant.DescriptorIndex - 1].String} {Constants[constant.NameIndex - 1].String}";
+					Console.WriteLine($"CONSTANT STRING: \"{constant.String}\"");
+					break;
+				}
+				default: break;
 			}
 		}
 	}
@@ -1604,7 +1084,7 @@ public class Disassembly
 						sb.Append(", ");
 					}
 
-					sb.Append(attribute.Code.Instructions[i].ToString());
+					sb.Append(attribute.Code.Instructions[i].ToString(Constants));
 				}
 				sb.Append(']');
 			}
@@ -1690,7 +1170,7 @@ public class Disassembly
 	{
 		// TODO: check for errors/out of range indices
 		method.Name = Constants[method.NameIndex - 1].String;
-		JStringReader reader = new(Constants[method.NameIndex - 1].String);
+		JStringReader reader = new(Constants[method.DescriptorIndex - 1].String);
 		method.MethodType = new JType(reader);
 	}
 
@@ -2206,6 +1686,7 @@ public class JStringReader
 		{
 			if (predicate(String[Index + count]))
 				break;
+			count++;
 		}
 		return Read(count);
 	}
@@ -2281,34 +1762,6 @@ static public class JDisassembler
 			if (constant.type == ConstantType.Double || constant.type == ConstantType.Long)
 			{
 				i++;
-			}
-
-
-
-		}
-
-		for (uint i = 0; i < disassembly.Constants.Length; i++)
-		{
-			Constant constant = disassembly.Constants[i];
-			switch (constant.type)
-			{
-				case ConstantType.Class:
-				case ConstantType.FieldReference:
-				case ConstantType.MethodReference:
-				case ConstantType.InterfaceMethodReference:
-				case ConstantType.StringReference:
-				{
-					constant.String = disassembly.Constants[constant.NameIndex - 1].String;
-					Console.WriteLine($"CONSTANT STRING: \"{constant.String}\"");
-					break;
-				}
-				case ConstantType.NameTypeDescriptor:
-				{
-					constant.String = $"{disassembly.Constants[constant.DescriptorIndex - 1].String} {disassembly.Constants[constant.NameIndex - 1].String}";
-					Console.WriteLine($"CONSTANT STRING: \"{constant.String}\"");
-					break;
-				}
-				default: break;
 			}
 		}
 

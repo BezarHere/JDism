@@ -15,6 +15,8 @@ internal class Program
 		Disassembly disassembly;
 		Console.WriteLine(JDisassembler.Decompile(br, out disassembly));
 		File.WriteAllText(base_path + "Decompiled.java", disassembly.GenerateSource());
+
 		Console.ReadKey();
+
 	}
 }
