@@ -6,7 +6,7 @@ using Colussom;
 
 namespace JDism;
 
-public enum VMOpCode : short
+public enum VMOpCode : byte
 {
 	Nop = 0,
 	AconstNull,
@@ -209,7 +209,10 @@ public enum VMOpCode : short
 	Ifnull,
 	Ifnonnull,
 	GotoW,
-	JsrW
+	JsrW,
+
+	_Max,
+	_Invalid = 0xff,
 }
 
 public enum MethodReferenceKind : byte
@@ -788,7 +791,7 @@ public class Attribute
 
 		public ushort MaxStack;
 		public ushort MaxLocals;
-		public byte[] ByteCode;
+		public Instruction[] Instructions;
 
 		public ExceptionRecord[] ExceptionRecords;
 		public Attribute[] Attributes;
@@ -850,10 +853,26 @@ public struct ConstantError(ushort index, string msg = "")
 
 public struct Instruction
 {
-	public VMOpCode OpCode;
+	public readonly VMOpCode OpCode;
 
-	private ushort _index1;
-	private uint _index2;
+	private readonly byte[] Data;
+
+	public Instruction(VMOpCode OpCode, byte[] data)
+	{
+		this.OpCode = OpCode;
+		this.Data = data;
+	}
+
+	public Instruction(VMOpCode OpCode)
+	{
+		this.OpCode = OpCode;
+		this.Data = [];
+	}
+
+	public Instruction()
+	{
+		this.OpCode = VMOpCode._Invalid;
+	}
 
 	public static string InstructionName(VMOpCode code) => Names[(int)code];
 
@@ -931,6 +950,7 @@ public struct Instruction
 		}
 	}
 
+	#region
 	private static readonly string[] Names = [
 		"nop",
 		"aconst_null",
@@ -1135,6 +1155,88 @@ public struct Instruction
 		"goto_w",
 		"jsr_w"
 	];
+	#endregion
+
+	private static VMOpCode ReadType(ByteReader reader)
+	{
+		byte byte_type = reader.ReadByte();
+		if (byte_type >= (byte)VMOpCode._Max)
+		{
+			return VMOpCode._Invalid;
+		}
+
+		return (VMOpCode)byte_type;
+	}
+
+	private static Instruction ReadWide(ByteReader reader)
+	{
+		VMOpCode type = ReadType(reader);
+		if (type == VMOpCode._Invalid)
+		{
+			return new();
+		}
+
+		int length = InstructionLength(type);
+		if (length >= 0)
+		{
+			return new(type, reader.Read(length * 2));
+		}
+
+		return new();
+	}
+
+	public static Instruction Read(ByteReader reader)
+	{
+		VMOpCode type = ReadType(reader);
+		if (type == VMOpCode._Invalid)
+		{
+			return new();
+		}
+
+		int length = InstructionLength(type);
+		if (length >= 0)
+		{
+			return new(type, reader.Read(length));
+		}
+
+		switch (type)
+		{
+			case VMOpCode.Tableswitch:
+			{
+				// skip 4 bytes
+				reader.ReadInt();
+				Console.WriteLine($"encountred a table switch: {reader.ReadInt()}, {reader.ReadInt()}, {reader.ReadInt()}");
+				break;
+			}
+			case VMOpCode.Lookupswitch:
+			{
+				// skip 4 bytes
+				reader.ReadInt();
+				Console.WriteLine($"encountred a lookup switch: {reader.ReadInt()}, {reader.ReadInt()}, {reader.ReadInt()}");
+				break;
+			}
+			case VMOpCode.Wide:
+			{
+				return ReadWide(reader);
+			}
+			default:
+				Console.WriteLine($"couldn't read the instruction of type {type}, length = {length}");
+				break;
+		}
+
+
+		return new();
+	}
+
+	public override string ToString() {
+		string s = InstructionName(OpCode);
+		foreach (byte b in Data)
+		{
+			s += $" 0x{b:X}";
+		}
+		return s;
+	}
+
 }
 
 public class Disassembly
@@ -1524,15 +1626,15 @@ public class Disassembly
 				sb.Append(", ");
 				sb.Append("stacksize=").Append(attribute.Code.MaxStack);
 				sb.Append(", ");
-				sb.Append("bytecode=[");
-				for (int i = 0; i < attribute.Code.ByteCode.Length; i++)
+				sb.Append("code=[");
+				for (int i = 0; i < attribute.Code.Instructions.Length; i++)
 				{
 					if (i > 0)
 					{
 						sb.Append(", ");
 					}
 
-					sb.Append($"0x{attribute.Code.ByteCode[i]:X}");
+					sb.Append(attribute.Code.Instructions[i].ToString());
 				}
 				sb.Append(']');
 			}
@@ -1638,8 +1740,15 @@ public class Disassembly
 			throw new InvalidDataException();
 		}
 
-		attribute.Code.ByteCode = reader.Read(code_len);
+		ByteReader instruction_reader = new(reader.Read(code_len), 0, reader.Endianness);
+		List<Instruction> instructions = new();
 
+		int instructions_read_tries = 0;
+		while (instruction_reader.SpaceLeft > 0 && instructions_read_tries++ < 0xffffff)
+		{
+			instructions.Add(Instruction.Read(instruction_reader));
+		}
+		attribute.Code.Instructions = instructions.ToArray();
 
 		ushort exception_table_len = reader.ReadUShort();
 		attribute.Code.ExceptionRecords = new Attribute.ExceptionRecord[exception_table_len];
@@ -1779,212 +1888,220 @@ public class Disassembly
 	private static readonly Dictionary<string, AttributeType> sAttributeTypeNames = GetAttributeTypeNames();
 }
 
+public class JReader
+{
+	public JReader(BinaryReader br)
+	{
+		Reader = br;
+	}
+
+	public byte[] ReadBuffer(int length)
+	{
+		byte[] data = new byte[length];
+		// FIXME: what to do if the buffer is not filled? throw an exception?
+		Reader.Read(data, 0, length);
+		return data;
+	}
+
+	public byte Read()
+	{
+		return Reader.ReadByte();
+	}
+
+	public ushort ReadU16BE()
+	{
+		ushort i = Reader.ReadUInt16();
+		return (ushort)((i >> 8) | (i << 8));
+	}
+
+	public uint ReadU32BE()
+	{
+		uint i = Reader.ReadUInt32();
+		return (i >> 24) | (((i >> 16) & 0xff) << 8) | (((i >> 8) & 0xff) << 16) | ((i & 0xff) << 24);
+	}
+
+	public ulong ReadU64BE()
+	{
+		ulong i = Reader.ReadUInt64();
+		return
+			(i >> 56)
+	| (((i >> 48) & 0xff) << 8)
+	| (((i >> 40) & 0xff) << 16)
+	| (((i >> 32) & 0xff) << 24)
+	| (((i >> 24) & 0xff) << 32)
+	| (((i >> 16) & 0xff) << 40)
+	| (((i >> 8) & 0xff) << 48)
+	| ((i & 0xff) << 56);
+	}
+
+	public float ReadIEEE754()
+	{
+		return Reader.ReadSingle();
+	}
+
+	public double ReadDoubleIEEE754()
+	{
+		return Reader.ReadDouble();
+	}
+
+	public Constant ReadConstant()
+	{
+		Constant constant = new()
+		{
+			type = (ConstantType)Read()
+		};
+
+		switch (constant.type)
+		{
+			case ConstantType.String:
+			{
+				ushort len = ReadU16BE();
+				byte[] bytes = new byte[len];
+				if (Reader.Read(bytes, 0, len) < len)
+				{
+					//! NOT ENOUGH BYTES
+				}
+
+				constant.String = Encoding.UTF8.GetString(bytes);
+				Console.WriteLine($"READ CONSTANT UTF8: \"{constant.String}\"");
+				break;
+			}
+			case ConstantType.Integer:
+			{
+				constant.IntegerValue = (int)ReadU32BE();
+				Console.WriteLine($"READ CONSTANT INT: {constant.IntegerValue}");
+				break;
+			}
+			case ConstantType.Float:
+			{
+				constant.LongValue = (int)ReadIEEE754();
+				Console.WriteLine($"READ CONSTANT LONG: {constant.LongValue}");
+				break;
+			}
+			case ConstantType.Long:
+			{
+				constant.FloatValue = (int)ReadU64BE();
+				Console.WriteLine($"READ CONSTANT FLOAT: {constant.FloatValue}");
+				break;
+			}
+			case ConstantType.Double:
+			{
+				constant.DoubleValue = (int)ReadDoubleIEEE754();
+				Console.WriteLine($"READ CONSTANT DOUBLE: {constant.DoubleValue}");
+				break;
+			}
+			case ConstantType.Class:
+			{
+				constant.NameIndex = ReadU16BE();
+				Console.WriteLine($"READ CONSTANT CLASS: NAME_INDEX={constant.NameIndex}");
+				break;
+			}
+			case ConstantType.FieldReference:
+			case ConstantType.MethodReference:
+			case ConstantType.InterfaceMethodReference:
+			{
+				constant.ClassIndex = ReadU16BE();
+				constant.NameTypeIndex = ReadU16BE();
+				Console.WriteLine($"READ CONSTANT F/M/IM-REF: CLASS_INDEX={constant.ClassIndex} NAMETYPE={constant.NameTypeIndex}");
+				break;
+			}
+			case ConstantType.StringReference:
+			{
+				constant.StringIndex = ReadU16BE();
+				Console.WriteLine($"READ CONSTANT STRING-REF: STRING_INDEX={constant.StringIndex}");
+				break;
+			}
+			case ConstantType.NameTypeDescriptor:
+			{
+				constant.NameIndex = ReadU16BE();
+				constant.DescriptorIndex = ReadU16BE();
+				Console.WriteLine($"READ CONSTANT NAMETYPE-DESC: NAMEINDEX={constant.NameIndex} DESCINDEX={constant.DescriptorIndex}");
+				break;
+			}
+			case ConstantType.MethodHandle:
+			{
+				constant.ReferenceKind = (MethodReferenceKind)Read();
+				constant.ReferenceIndex = ReadU16BE();
+				Console.WriteLine($"READ CONSTANT MHANDLE: REFKIND={constant.ReferenceKind} REFINDEX={constant.ReferenceIndex}");
+				break;
+			}
+			case ConstantType.MethodType:
+			{
+				constant.DescriptorIndex = ReadU16BE();
+				Console.WriteLine($"READ CONSTANT MTYPE: DESCINDEX={constant.DescriptorIndex}");
+				break;
+			}
+			case ConstantType.InvokeDynamic:
+			{
+				constant.BootstrapMethodAttrIndex = ReadU16BE();
+				constant.NameTypeIndex = ReadU16BE();
+				Console.WriteLine($"READ CONSTANT INVOKEDYN: BMAI={constant.BootstrapMethodAttrIndex} NAMETYPE={constant.NameTypeIndex}");
+				break;
+			}
+		}
+
+		return constant;
+	}
+
+	public Attribute ReadAttribute()
+	{
+		Attribute attributeInfo = new()
+		{
+			NameIndex = ReadU16BE()
+		};
+
+		uint data_len = ReadU32BE();
+		attributeInfo._data = Reader.ReadBytes((int)data_len);
+		if (attributeInfo._data.Length < data_len)
+		{
+			//! NOT ENOUGH BYTES
+		}
+		return attributeInfo;
+	}
+
+	public Field ReadField()
+	{
+		Field field = new()
+		{
+			AccessFlags = (FieldAccessFlags)ReadU16BE(),
+			NameIndex = ReadU16BE(),
+			DescriptorIndex = ReadU16BE()
+		};
+
+		field.Attributes = new Attribute[ReadU16BE()];
+
+		for (uint i = 0; i < field.Attributes.Length; i++)
+		{
+			field.Attributes[i] = ReadAttribute();
+		}
+
+		return field;
+	}
+
+	public Method ReadMethod()
+	{
+		Method method = new()
+		{
+			AccessFlags = (MethodAccessFlags)ReadU16BE(),
+			NameIndex = ReadU16BE(),
+			DescriptorIndex = ReadU16BE()
+		};
+
+		method.Attributes = new Attribute[ReadU16BE()];
+
+		for (uint i = 0; i < method.Attributes.Length; i++)
+		{
+			method.Attributes[i] = ReadAttribute();
+		}
+
+		return method;
+	}
+
+	public BinaryReader Reader { get; init; }
+}
+
 static public class JDisassembler
 {
-
-	public class JReader
-	{
-		public JReader(BinaryReader br)
-		{
-			Reader = br;
-		}
-
-		public byte Read()
-		{
-			return Reader.ReadByte();
-		}
-
-		public ushort ReadU16BE()
-		{
-			ushort i = Reader.ReadUInt16();
-			return (ushort)((i >> 8) | (i << 8));
-		}
-
-		public uint ReadU32BE()
-		{
-			uint i = Reader.ReadUInt32();
-			return (i >> 24) | (((i >> 16) & 0xff) << 8) | (((i >> 8) & 0xff) << 16) | ((i & 0xff) << 24);
-		}
-
-		public ulong ReadU64BE()
-		{
-			ulong i = Reader.ReadUInt64();
-			return
-				(i >> 56)
-		| (((i >> 48) & 0xff) << 8)
-		| (((i >> 40) & 0xff) << 16)
-		| (((i >> 32) & 0xff) << 24)
-		| (((i >> 24) & 0xff) << 32)
-		| (((i >> 16) & 0xff) << 40)
-		| (((i >> 8) & 0xff) << 48)
-		| ((i & 0xff) << 56);
-		}
-
-		public float ReadIEEE754()
-		{
-			return Reader.ReadSingle();
-		}
-
-		public double ReadDoubleIEEE754()
-		{
-			return Reader.ReadDouble();
-		}
-
-		public Constant ReadConstant()
-		{
-			Constant constant = new()
-			{
-				type = (ConstantType)Read()
-			};
-
-			switch (constant.type)
-			{
-				case ConstantType.String:
-				{
-					ushort len = ReadU16BE();
-					byte[] bytes = new byte[len];
-					if (Reader.Read(bytes, 0, len) < len)
-					{
-						//! NOT ENOUGH BYTES
-					}
-
-					constant.String = Encoding.UTF8.GetString(bytes);
-					Console.WriteLine($"READ CONSTANT UTF8: \"{constant.String}\"");
-					break;
-				}
-				case ConstantType.Integer:
-				{
-					constant.IntegerValue = (int)ReadU32BE();
-					Console.WriteLine($"READ CONSTANT INT: {constant.IntegerValue}");
-					break;
-				}
-				case ConstantType.Float:
-				{
-					constant.LongValue = (int)ReadIEEE754();
-					Console.WriteLine($"READ CONSTANT LONG: {constant.LongValue}");
-					break;
-				}
-				case ConstantType.Long:
-				{
-					constant.FloatValue = (int)ReadU64BE();
-					Console.WriteLine($"READ CONSTANT FLOAT: {constant.FloatValue}");
-					break;
-				}
-				case ConstantType.Double:
-				{
-					constant.DoubleValue = (int)ReadDoubleIEEE754();
-					Console.WriteLine($"READ CONSTANT DOUBLE: {constant.DoubleValue}");
-					break;
-				}
-				case ConstantType.Class:
-				{
-					constant.NameIndex = ReadU16BE();
-					Console.WriteLine($"READ CONSTANT CLASS: NAME_INDEX={constant.NameIndex}");
-					break;
-				}
-				case ConstantType.FieldReference:
-				case ConstantType.MethodReference:
-				case ConstantType.InterfaceMethodReference:
-				{
-					constant.ClassIndex = ReadU16BE();
-					constant.NameTypeIndex = ReadU16BE();
-					Console.WriteLine($"READ CONSTANT F/M/IM-REF: CLASS_INDEX={constant.ClassIndex} NAMETYPE={constant.NameTypeIndex}");
-					break;
-				}
-				case ConstantType.StringReference:
-				{
-					constant.StringIndex = ReadU16BE();
-					Console.WriteLine($"READ CONSTANT STRING-REF: STRING_INDEX={constant.StringIndex}");
-					break;
-				}
-				case ConstantType.NameTypeDescriptor:
-				{
-					constant.NameIndex = ReadU16BE();
-					constant.DescriptorIndex = ReadU16BE();
-					Console.WriteLine($"READ CONSTANT NAMETYPE-DESC: NAMEINDEX={constant.NameIndex} DESCINDEX={constant.DescriptorIndex}");
-					break;
-				}
-				case ConstantType.MethodHandle:
-				{
-					constant.ReferenceKind = (MethodReferenceKind)Read();
-					constant.ReferenceIndex = ReadU16BE();
-					Console.WriteLine($"READ CONSTANT MHANDLE: REFKIND={constant.ReferenceKind} REFINDEX={constant.ReferenceIndex}");
-					break;
-				}
-				case ConstantType.MethodType:
-				{
-					constant.DescriptorIndex = ReadU16BE();
-					Console.WriteLine($"READ CONSTANT MTYPE: DESCINDEX={constant.DescriptorIndex}");
-					break;
-				}
-				case ConstantType.InvokeDynamic:
-				{
-					constant.BootstrapMethodAttrIndex = ReadU16BE();
-					constant.NameTypeIndex = ReadU16BE();
-					Console.WriteLine($"READ CONSTANT INVOKEDYN: BMAI={constant.BootstrapMethodAttrIndex} NAMETYPE={constant.NameTypeIndex}");
-					break;
-				}
-			}
-
-			return constant;
-		}
-
-		public Attribute ReadAttribute()
-		{
-			Attribute attributeInfo = new()
-			{
-				NameIndex = ReadU16BE()
-			};
-
-			uint data_len = ReadU32BE();
-			attributeInfo._data = Reader.ReadBytes((int)data_len);
-			if (attributeInfo._data.Length < data_len)
-			{
-				//! NOT ENOUGH BYTES
-			}
-			return attributeInfo;
-		}
-
-		public Field ReadField()
-		{
-			Field field = new()
-			{
-				AccessFlags = (FieldAccessFlags)ReadU16BE(),
-				NameIndex = ReadU16BE(),
-				DescriptorIndex = ReadU16BE()
-			};
-
-			field.Attributes = new Attribute[ReadU16BE()];
-
-			for (uint i = 0; i < field.Attributes.Length; i++)
-			{
-				field.Attributes[i] = ReadAttribute();
-			}
-
-			return field;
-		}
-
-		public Method ReadMethod()
-		{
-			Method method = new()
-			{
-				AccessFlags = (MethodAccessFlags)ReadU16BE(),
-				NameIndex = ReadU16BE(),
-				DescriptorIndex = ReadU16BE()
-			};
-
-			method.Attributes = new Attribute[ReadU16BE()];
-
-			for (uint i = 0; i < method.Attributes.Length; i++)
-			{
-				method.Attributes[i] = ReadAttribute();
-			}
-
-			return method;
-		}
-
-		public BinaryReader Reader { get; init; }
-	}
 
 	public static string Decompile(BinaryReader stream, out Disassembly disassembly)
 	{
@@ -2030,6 +2147,13 @@ static public class JDisassembler
 				i++;
 			}
 
+
+
+		}
+
+		for (uint i = 0; i < disassembly.Constants.Length; i++)
+		{
+			Constant constant = disassembly.Constants[i];
 			switch (constant.type)
 			{
 				case ConstantType.Class:
@@ -2050,7 +2174,6 @@ static public class JDisassembler
 				}
 				default: break;
 			}
-
 		}
 
 		disassembly.BuildCIRT();
