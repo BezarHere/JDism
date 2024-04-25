@@ -596,6 +596,10 @@ public struct Instruction
 	public override string ToString() => ToString(null);
 	public string ToString(Constant[]? constants)
 	{
+		if (OpCode >= VMOpCode._Max)
+		{
+			return "invalid";
+		}
 		StringBuilder builder = new();
 		builder.Append(InstructionName(OpCode));
 		if (Data.Length > 0)
@@ -633,9 +637,12 @@ public struct Instruction
 					return constant.String + 'f';
 				case ConstantType.Double:
 					return constant.String + 'F';
+				case ConstantType.String:
+				case ConstantType.StringReference:
+					return $"\"{constant.String}\"";
 			}
 
-			return $"\"{constant.String}\":{constant.type}";
+			return $"{constant.String}:{constant.type}";
 		}
 
 		switch (OpCode)

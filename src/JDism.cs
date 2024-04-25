@@ -1017,6 +1017,9 @@ public class Disassembly
 		for (uint i = 0; i < Constants.Length; i++)
 		{
 			Constant constant = Constants[i];
+			if (constant.type == ConstantType.Long || constant.type == ConstantType.Double)
+				i++;
+
 			switch (constant.type)
 			{
 				case ConstantType.Integer:
@@ -1062,7 +1065,7 @@ public class Disassembly
 
 	private string AttributesToAnnotations(Attribute[] attributes)
 	{
-		StringBuilder sb = new StringBuilder();
+		StringBuilder sb = new();
 
 		foreach (Attribute attribute in attributes)
 		{
