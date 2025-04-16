@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Data;
+using System.Diagnostics;
 using System.Reflection.Emit;
 using System.Security.Cryptography;
 using System.Text;
@@ -6,640 +7,7 @@ using Colussom;
 
 namespace JDism;
 
-
-public enum MethodReferenceKind : byte
-{
-	None = 0,
-	GetField,
-	GetStatic,
-	PutField,
-	PutStatic,
-	InvokeVirtual,
-	InvokeStatic,
-	InvokeSpecial,
-	NewInvokeSpecial,
-	InvokeInterface
-}
-
-public enum JTypeType
-{
-	Void = 'V',
-	// signed byte
-	Byte = 'B',
-	// utf16
-	Char = 'C',
-	Double = 'D',
-	Float = 'F',
-	Int = 'I',
-	Long = 'J',
-	Object = 'L',
-	Short = 'S',
-	Boolean = 'Z',
-	Method,
-}
-
-public enum AttributeType : ushort
-{
-	None = 0,
-	ConstantValue,
-	Code,
-	StackMapTable,
-	Exceptions,
-	BootstrapMethods,
-	InnerClasses,
-	EnclosingMethod,
-	Synthetic,
-	Signature,
-	RuntimeVisibleAnnotations,
-	RuntimeInvisibleAnnotations,
-	RuntimeVisibleParameterAnnotations,
-	RuntimeInvisibleParameterAnnotations,
-	RuntimeVisibleTypeAnnotations,
-	RuntimeInvisibleTypeAnnotations,
-	AnnotationDefault,
-	MethodParameters,
-	SourceFile,
-	SourceDebugExtension,
-	LineNumberTable,
-	LocalVariableTable,
-	LocalVariableTypeTable,
-	Deprecated,
-	UserDefined = 0xffff,
-}
-
-[Flags]
-public enum MethodAccessFlags
-{
-	None = 0,
-	Public = 0x0001,
-	Private = 0x0002,
-	Protected = 0x0004,
-	Static = 0x0008,
-	Final = 0x0010,
-	Synchronized = 0x0020,
-	Bridge = 0x0040,
-	VarArgs = 0x0080,
-	Native = 0x0100,
-	Abstract = 0x0400,
-	Strict = 0x0800,
-	Synthetic = 0x1000,
-}
-
-[Flags]
-public enum FieldAccessFlags
-{
-	None = 0,
-	Public = 0x0001,
-	Private = 0x0002,
-	Protected = 0x0004,
-	Static = 0x0008,
-	Final = 0x0010,
-
-	Volatile = 0x0040,
-	Transient = 0x0080,
-
-	Synthetic = 0x1000,
-	Enum = 0x4000,
-}
-
-[Flags]
-public enum ClassAccessFlags
-{
-	None = 0,
-	Public = 0x0001,
-
-
-	Final = 0x0010,
-	Super = 0x0020,
-
-	Interface = 0x0200,
-	Abstract = 0x0400,
-
-	Synthetic = 0x1000,
-	Annotation = 0x2000,
-	Enum = 0x4000,
-}
-
-
-public static class AccessFlagsUtility
-{
-
-	public static void ToString(Action<string> loader, FieldAccessFlags accessFlags)
-	{
-		if (accessFlags.HasFlag(FieldAccessFlags.Public))
-		{
-			loader("public");
-		}
-		else if (accessFlags.HasFlag(FieldAccessFlags.Private))
-		{
-			loader("private");
-		}
-		else if (accessFlags.HasFlag(FieldAccessFlags.Protected))
-		{
-			loader("protected");
-		}
-
-		if (accessFlags.HasFlag(FieldAccessFlags.Static))
-		{
-			loader("static");
-		}
-
-		if (accessFlags.HasFlag(FieldAccessFlags.Final))
-		{
-			loader("final");
-		}
-
-		if (accessFlags.HasFlag(FieldAccessFlags.Volatile))
-		{
-			loader("volatile");
-		}
-
-		if (accessFlags.HasFlag(FieldAccessFlags.Transient))
-		{
-			loader("transient");
-		}
-	}
-
-	public static void ToString(Action<string> loader, MethodAccessFlags accessFlags)
-	{
-		if (accessFlags.HasFlag(MethodAccessFlags.Public))
-		{
-			loader("public");
-		}
-		else if (accessFlags.HasFlag(MethodAccessFlags.Private))
-		{
-			loader("private");
-		}
-		else if (accessFlags.HasFlag(MethodAccessFlags.Protected))
-		{
-			loader("protected");
-		}
-
-		if (accessFlags.HasFlag(MethodAccessFlags.Static))
-		{
-			loader("static");
-		}
-
-		if (accessFlags.HasFlag(MethodAccessFlags.Final))
-		{
-			loader("final");
-		}
-
-		else if (accessFlags.HasFlag(MethodAccessFlags.Abstract))
-		{
-			loader("abstract");
-		}
-	}
-
-	public static void ToString(Action<string> loader, ClassAccessFlags accessFlags)
-	{
-		if (accessFlags.HasFlag(ClassAccessFlags.Public))
-		{
-			loader("public");
-		}
-
-		if (accessFlags.HasFlag(ClassAccessFlags.Final))
-		{
-			loader("final");
-		}
-
-		if (accessFlags.HasFlag(ClassAccessFlags.Enum))
-		{
-			loader("enum");
-		}
-		else if (accessFlags.HasFlag(ClassAccessFlags.Interface))
-		{
-			loader("interface");
-		}
-		else if (accessFlags.HasFlag(ClassAccessFlags.Abstract))
-		{
-			loader("abstract class");
-		}
-		else
-		{
-			loader("class");
-		}
-	}
-
-
-}
-
-
-public class JType
-{
-	public JTypeType Type;
-	public ushort ArrayDimension = 0;
-	public string ObjectType = "";
-	public JType[] MethodParameters = [];
-	public JType ReturnType;
-	public JType[] Generics = [];
-
-
-	public JType()
-	{
-		Type = JTypeType.Object;
-	}
-
-	public JType(JStringReader reader)
-	{
-		if (reader.EOF) return;
-
-		if (reader.String.StartsWith("<init>") || reader.String.StartsWith("<cinit>"))
-		{
-			Type = JTypeType.Method;
-			Console.WriteLine($"found a special function: {reader.String}");
-			return;
-		}
-
-		// check for arrays
-		ArrayDimension = (ushort)reader.SkipCount('[');
-
-		switch (reader.Read())
-		{
-			case 'V':
-			{
-				Type = JTypeType.Void;
-				break;
-			}
-			case 'B':
-			{
-				Type = JTypeType.Byte;
-				break;
-			}
-			case 'C':
-			{
-				Type = JTypeType.Char;
-				break;
-			}
-			case 'D':
-			{
-				Type = JTypeType.Double;
-				break;
-			}
-			case 'F':
-			{
-				Type = JTypeType.Float;
-				break;
-			}
-			case 'I':
-			{
-				Type = JTypeType.Int;
-				break;
-			}
-			case 'J':
-			{
-				Type = JTypeType.Long;
-				break;
-			}
-			case 'S':
-			{
-				Type = JTypeType.Short;
-				break;
-			}
-			case 'Z':
-			{
-				Type = JTypeType.Boolean;
-				break;
-			}
-			// TYPE
-			case 'L':
-			{
-				Type = JTypeType.Object;
-
-				int semicolon_pos = reader.IndexOf(';');
-				if (semicolon_pos == -1)
-				{
-					throw new InvalidDataException($"\nObject Type Does Not have The Terminating Semicolon: \"{reader}\"");
-				}
-
-				ObjectType = reader.ReadUntil(c => c == ';');
-				reader.Skip(); // skip ';'
-
-
-
-				break;
-			}
-			// method
-			case '(':
-			{
-				Type = JTypeType.Method;
-
-				int end_para = reader.IndexOf(')');
-				// no closing parenthesis
-				if (end_para == -1)
-				{
-					throw new InvalidDataException($"Ill-Formed Method JType: \"{reader}\"");
-				}
-
-
-				// read every thing between the '(' & ')'
-				string parameters_typing = reader.ReadUntil(c => c == ')');
-				reader.Skip(); // skip ')'
-
-				try
-				{
-					ReturnType = new JType(reader);
-				}
-				catch (Exception)
-				{
-					Console.WriteLine($"Error While Parsing Return Type For Method JType: \"{reader}\"");
-					throw;
-				}
-
-				List<JType> parameters = new(8);
-				JStringReader parameters_reader = new(parameters_typing);
-
-				while (parameters_reader) // not EOF
-				{
-					// TODO: CATCH EXCEPTIONS FOR MORE DETAILS
-					JType type = new(parameters_reader);
-
-					parameters.Add(type);
-				}
-
-				MethodParameters = parameters.ToArray();
-
-				break;
-			}
-			default:
-			{
-				throw new InvalidDataException($"Invalid Encoding For JType: \"{reader}\"");
-			}
-		}
-
-		if (reader.Peek() == '<')
-		{
-			reader.Skip(); // skips '<'
-
-			int end_arrow = reader.IndexOf('>');
-			if (end_arrow == -1)
-			{
-				throw new InvalidDataException($"Invalid generics {reader}");
-			}
-
-			string generics_raw = reader.ReadUntil(c => c == '>');
-			reader.Skip(); // skips '>'
-
-
-			List<JType> generics = new(8);
-
-			JStringReader generics_reader = new(generics_raw);
-			while (generics_reader) // not EOF
-			{
-				// TODO: CATCH EXCEPTIONS FOR MORE DETAILS
-				JType type = new(generics_reader);
-
-				generics.Add(type);
-			}
-
-			Generics = generics.ToArray();
-		}
-
-	}
-
-	public JType(JTypeType type, ushort arr_d, string obj_type)
-	{
-		Type = type;
-		ArrayDimension = arr_d;
-		ObjectType = obj_type;
-	}
-
-
-	public override string ToString()
-	{
-		StringBuilder stringBuilder = new(8);
-
-		switch (Type)
-		{
-			case JTypeType.Void:
-				stringBuilder.Append("void");
-				break;
-			case JTypeType.Byte:
-				stringBuilder.Append("byte");
-				break;
-			case JTypeType.Char:
-				stringBuilder.Append("char");
-				break;
-			case JTypeType.Double:
-				stringBuilder.Append("double");
-				break;
-			case JTypeType.Float:
-				stringBuilder.Append("float");
-				break;
-			case JTypeType.Int:
-				stringBuilder.Append("int");
-				break;
-			case JTypeType.Long:
-				stringBuilder.Append("long");
-				break;
-			case JTypeType.Object:
-				stringBuilder.Append(GetSimplifiedObjectType());
-				break;
-			case JTypeType.Short:
-				stringBuilder.Append("short");
-				break;
-			case JTypeType.Boolean:
-				stringBuilder.Append("boolean");
-				break;
-			case JTypeType.Method:
-				// TODO?
-				stringBuilder.Append($"Function<{ReturnType?.ToString()}, ...>");
-				break;
-			default:
-				stringBuilder.Append("Object");
-				break;
-		}
-
-		if (Generics is not null && Generics.Length != 0)
-		{
-			stringBuilder.Append('<');
-			for (int i = 0; i < Generics.Length; i++)
-			{
-				if (i > 0)
-				{
-					stringBuilder.Append(", ");
-				}
-
-				stringBuilder.Append(Generics[i].ToString());
-			}
-			stringBuilder.Append('>');
-		}
-
-		for (ushort i = 0; i < ArrayDimension; i++)
-			stringBuilder.Append("[]");
-
-		return stringBuilder.ToString();
-	}
-
-	// for object/ref types, returns the package that they belong to
-	// if the type is not an object/ref, an empty string will be returned
-	public string GetPackageName()
-	{
-		if (this.Type == JTypeType.Object)
-		{
-			return ObjectType.Substring(0, ObjectType.LastIndexOf('/'));
-		}
-		return string.Empty;
-	}
-
-	// for object/ref types, returns the package that they belong to
-	// if the type is not an object/ref, an empty string will be returned
-	public string GetObjectName()
-	{
-		if (this.Type == JTypeType.Object)
-		{
-			return ObjectType.Substring(ObjectType.LastIndexOf('/') + 1).Replace('$', '.');
-		}
-		return string.Empty;
-	}
-
-	// cleans the type path, for example java/lang/object -> object or net/example/com/SomeType -> SomeType
-	// subclasses 'Type$SubType' will be cleaned to 'Type.SubType'
-	public string GetSimplifiedObjectType()
-	{
-		if (GetPackageName().StartsWith("java/"))
-			return GetObjectName();
-		return ObjectType;
-	}
-
-}
-
-public enum ConstantType
-{
-	None = 0,
-	String,
-	Integer = 3,
-	Float,
-	Long,
-	Double,
-	Class,
-	StringReference,
-	FieldReference,
-	MethodReference,
-	InterfaceMethodReference,
-	NameTypeDescriptor,
-	MethodHandle = 15,
-	MethodType,
-	Dynamic,
-	InvokeDynamic,
-	//Module,
-	//Package
-
-}
-
-public class Constant
-{
-	public ConstantType type;
-
-	public int IntegerValue { get => (int)long_int; set => long_int = value; }
-	public long LongValue { get => long_int; set => long_int = value; }
-
-	public float FloatValue { get => (float)double_float; set => double_float = value; }
-	public double DoubleValue { get => double_float; set => double_float = value; }
-
-	public ushort ClassIndex { get => index1; set => index1 = value; }
-	public ushort StringIndex { get => index1; set => index1 = value; }
-	public ushort NameTypeIndex { get => index2; set => index2 = value; }
-	public ushort NameIndex { get => index1; set => index1 = value; }
-	public ushort DescriptorIndex { get => index2; set => index2 = value; }
-	public MethodReferenceKind ReferenceKind { get => (MethodReferenceKind)index1; set => index1 = (ushort)value; }
-	public ushort ReferenceIndex { get => index2; set => index2 = value; }
-
-	public ushort BootstrapMethodAttrIndex { get => index1; set => index1 = value; }
-
-	public string String { get; set; } = "";
-
-	private ushort index1;
-	private ushort index2;
-	private long long_int;
-	private double double_float;
-
-	public bool IsDoubleSlotted()
-	{
-		return type == ConstantType.Double || type == ConstantType.Long;
-	}
-
-}
-
-public class Attribute
-{
-	public struct ConstantValueInfo
-	{
-		public ushort Index;
-	}
-	public struct SignatureInfo
-	{
-		public ushort Index;
-		public string Value;
-	}
-	public record ExceptionRecord(ushort StartPc, ushort EndPc, ushort HandlerPc, ushort CatchType);
-
-	public struct CodeInfo
-	{
-
-		public ushort MaxStack;
-		public ushort MaxLocals;
-		public Instruction[] Instructions;
-
-		public ExceptionRecord[] ExceptionRecords;
-		public Attribute[] Attributes;
-	}
-
-	public record VerificationTypeRecord(byte Type, ushort Index);
-
-	public struct StackMapFrameInfo
-	{
-		public byte Type = 255;
-		public ushort OffsetDelta = 0;
-		public VerificationTypeRecord[] Locals = [];
-		public VerificationTypeRecord[] Stack = [];
-
-		public StackMapFrameInfo()
-		{
-		}
-	}
-
-	public AttributeType Type;
-	public ushort NameIndex;
-	public string Name = "";
-
-
-
-	public ConstantValueInfo ConstantValue;
-	public SignatureInfo Signature;
-	public CodeInfo Code;
-	public StackMapFrameInfo[] StackMapTable = [];
-
-	// for custom defined attributes
-	public byte[] _data = [];
-}
-
-public class Field
-{
-	public FieldAccessFlags AccessFlags;
-	public ushort NameIndex;
-	public string Name = "";
-	public ushort DescriptorIndex;
-	public JType ValueType = new();
-	public Attribute[] Attributes = [];
-}
-public class Method
-{
-	public MethodAccessFlags AccessFlags;
-	public ushort NameIndex;
-	public string Name = "";
-	public ushort DescriptorIndex;
-	public JType MethodType = new();
-	public Attribute[] Attributes = [];
-}
-
-public struct ConstantError(ushort index, string msg = "")
-{
-	public ushort Index = index;
-	public string Message = msg;
-}
-
-public class Disassembly
+public class Disassembly : InnerLogger
 {
 	public ushort VersionMinor;
 	public ushort VersionMajor;
@@ -715,7 +83,7 @@ public class Disassembly
 					builder.Append(AttributesToAnnotations(field.Attributes));
 
 				AccessFlagsUtility.ToString((string s) => builder.Append(s).Append(' '), field.AccessFlags);
-				builder.Append(field.ValueType is not null ? field.ValueType.ToString() : "NULL").Append(' ');
+				builder.Append(field.ResultType is not null ? field.ResultType.ToString() : "NULL").Append(' ');
 				builder.Append(field.Name).Append(";\n");
 			}
 		}
@@ -745,7 +113,7 @@ public class Disassembly
 				else
 				{
 					// return
-					builder.Append(method.MethodType.ReturnType.ToString()).Append(' ');
+					builder.Append(method.ResultType.ReturnType.ToString()).Append(' ');
 					bool internal_name = method.Name.Contains('$');
 					if (internal_name)
 					{
@@ -757,9 +125,9 @@ public class Disassembly
 				// parameters
 				builder.Append('(');
 
-				for (int i = 0; i < method.MethodType.MethodParameters.Length; i++)
+				for (int i = 0; i < method.ResultType.MethodParameters.Length; i++)
 				{
-					JType method_param = method.MethodType.MethodParameters[i];
+					JType method_param = method.ResultType.MethodParameters[i];
 					if (i > 0)
 					{
 						builder.Append(", ");
@@ -1049,13 +417,13 @@ public class Disassembly
 				case ConstantType.StringReference:
 				{
 					constant.String = Constants[constant.NameIndex - 1].String;
-					Console.WriteLine($"CONSTANT STRING: \"{constant.String}\"");
+					Logger.WriteLine($"CONSTANT STRING: \"{constant.String}\"");
 					break;
 				}
 				case ConstantType.NameTypeDescriptor:
 				{
 					constant.String = $"{Constants[constant.DescriptorIndex - 1].String} {Constants[constant.NameIndex - 1].String}";
-					Console.WriteLine($"CONSTANT STRING: \"{constant.String}\"");
+					Logger.WriteLine($"CONSTANT STRING: \"{constant.String}\"");
 					break;
 				}
 				default: break;
@@ -1166,7 +534,7 @@ public class Disassembly
 		// TODO: check for errors/out of range indices
 		field.Name = Constants[field.NameIndex - 1].String;
 		JStringReader reader = new(Constants[field.DescriptorIndex - 1].String);
-		field.ValueType = new JType(reader);
+		field.ResultType = new JType(reader);
 	}
 
 	private void SetupMethod(Method method)
@@ -1174,7 +542,7 @@ public class Disassembly
 		// TODO: check for errors/out of range indices
 		method.Name = Constants[method.NameIndex - 1].String;
 		JStringReader reader = new(Constants[method.DescriptorIndex - 1].String);
-		method.MethodType = new JType(reader);
+		method.ResultType = new JType(reader);
 	}
 
 	private static void LoadCodeInfo(Attribute attribute)
@@ -1343,391 +711,14 @@ public class Disassembly
 	private static readonly Dictionary<string, AttributeType> sAttributeTypeNames = GetAttributeTypeNames();
 }
 
-public class JReader
-{
-	public JReader(BinaryReader br)
-	{
-		Reader = br;
-	}
-
-	public byte[] ReadBuffer(int length)
-	{
-		byte[] data = new byte[length];
-		// FIXME: what to do if the buffer is not filled? throw an exception?
-		Reader.Read(data, 0, length);
-		return data;
-	}
-
-	public byte Read()
-	{
-		return Reader.ReadByte();
-	}
-
-	public ushort ReadU16BE()
-	{
-		ushort i = Reader.ReadUInt16();
-		return (ushort)((i >> 8) | (i << 8));
-	}
-
-	public uint ReadU32BE()
-	{
-		uint i = Reader.ReadUInt32();
-		return (i >> 24) | (((i >> 16) & 0xff) << 8) | (((i >> 8) & 0xff) << 16) | ((i & 0xff) << 24);
-	}
-
-	public ulong ReadU64BE()
-	{
-		ulong i = Reader.ReadUInt64();
-		return
-			(i >> 56)
-	| (((i >> 48) & 0xff) << 8)
-	| (((i >> 40) & 0xff) << 16)
-	| (((i >> 32) & 0xff) << 24)
-	| (((i >> 24) & 0xff) << 32)
-	| (((i >> 16) & 0xff) << 40)
-	| (((i >> 8) & 0xff) << 48)
-	| ((i & 0xff) << 56);
-	}
-
-	public float ReadIEEE754()
-	{
-		return Reader.ReadSingle();
-	}
-
-	public double ReadDoubleIEEE754()
-	{
-		return Reader.ReadDouble();
-	}
-
-	public Constant ReadConstant()
-	{
-		Constant constant = new()
-		{
-			type = (ConstantType)Read()
-		};
-
-		switch (constant.type)
-		{
-			case ConstantType.String:
-			{
-				ushort len = ReadU16BE();
-				byte[] bytes = new byte[len];
-				if (Reader.Read(bytes, 0, len) < len)
-				{
-					//! NOT ENOUGH BYTES
-				}
-
-				constant.String = Encoding.UTF8.GetString(bytes);
-				Console.WriteLine($"READ CONSTANT UTF8: \"{constant.String}\"");
-				break;
-			}
-			case ConstantType.Integer:
-			{
-				constant.IntegerValue = (int)ReadU32BE();
-				Console.WriteLine($"READ CONSTANT INT: {constant.IntegerValue}");
-				break;
-			}
-			case ConstantType.Float:
-			{
-				constant.LongValue = (int)ReadIEEE754();
-				Console.WriteLine($"READ CONSTANT LONG: {constant.LongValue}");
-				break;
-			}
-			case ConstantType.Long:
-			{
-				constant.FloatValue = (int)ReadU64BE();
-				Console.WriteLine($"READ CONSTANT FLOAT: {constant.FloatValue}");
-				break;
-			}
-			case ConstantType.Double:
-			{
-				constant.DoubleValue = (int)ReadDoubleIEEE754();
-				Console.WriteLine($"READ CONSTANT DOUBLE: {constant.DoubleValue}");
-				break;
-			}
-			case ConstantType.Class:
-			{
-				constant.NameIndex = ReadU16BE();
-				Console.WriteLine($"READ CONSTANT CLASS: NAME_INDEX={constant.NameIndex}");
-				break;
-			}
-			case ConstantType.FieldReference:
-			case ConstantType.MethodReference:
-			case ConstantType.InterfaceMethodReference:
-			{
-				constant.ClassIndex = ReadU16BE();
-				constant.NameTypeIndex = ReadU16BE();
-				Console.WriteLine($"READ CONSTANT F/M/IM-REF: CLASS_INDEX={constant.ClassIndex} NAMETYPE={constant.NameTypeIndex}");
-				break;
-			}
-			case ConstantType.StringReference:
-			{
-				constant.StringIndex = ReadU16BE();
-				Console.WriteLine($"READ CONSTANT STRING-REF: STRING_INDEX={constant.StringIndex}");
-				break;
-			}
-			case ConstantType.NameTypeDescriptor:
-			{
-				constant.NameIndex = ReadU16BE();
-				constant.DescriptorIndex = ReadU16BE();
-				Console.WriteLine($"READ CONSTANT NAMETYPE-DESC: NAMEINDEX={constant.NameIndex} DESCINDEX={constant.DescriptorIndex}");
-				break;
-			}
-			case ConstantType.MethodHandle:
-			{
-				constant.ReferenceKind = (MethodReferenceKind)Read();
-				constant.ReferenceIndex = ReadU16BE();
-				Console.WriteLine($"READ CONSTANT MHANDLE: REFKIND={constant.ReferenceKind} REFINDEX={constant.ReferenceIndex}");
-				break;
-			}
-			case ConstantType.MethodType:
-			{
-				constant.DescriptorIndex = ReadU16BE();
-				Console.WriteLine($"READ CONSTANT MTYPE: DESCINDEX={constant.DescriptorIndex}");
-				break;
-			}
-			case ConstantType.InvokeDynamic:
-			{
-				constant.BootstrapMethodAttrIndex = ReadU16BE();
-				constant.NameTypeIndex = ReadU16BE();
-				Console.WriteLine($"READ CONSTANT INVOKEDYN: BMAI={constant.BootstrapMethodAttrIndex} NAMETYPE={constant.NameTypeIndex}");
-				break;
-			}
-		}
-
-		return constant;
-	}
-
-	public Attribute ReadAttribute()
-	{
-		Attribute attributeInfo = new()
-		{
-			NameIndex = ReadU16BE()
-		};
-
-		uint data_len = ReadU32BE();
-		attributeInfo._data = Reader.ReadBytes((int)data_len);
-		if (attributeInfo._data.Length < data_len)
-		{
-			//! NOT ENOUGH BYTES
-		}
-		return attributeInfo;
-	}
-
-	public Field ReadField()
-	{
-		Field field = new()
-		{
-			AccessFlags = (FieldAccessFlags)ReadU16BE(),
-			NameIndex = ReadU16BE(),
-			DescriptorIndex = ReadU16BE()
-		};
-
-		field.Attributes = new Attribute[ReadU16BE()];
-
-		for (uint i = 0; i < field.Attributes.Length; i++)
-		{
-			field.Attributes[i] = ReadAttribute();
-		}
-
-		return field;
-	}
-
-	public Method ReadMethod()
-	{
-		Method method = new()
-		{
-			AccessFlags = (MethodAccessFlags)ReadU16BE(),
-			NameIndex = ReadU16BE(),
-			DescriptorIndex = ReadU16BE()
-		};
-
-		method.Attributes = new Attribute[ReadU16BE()];
-
-		for (uint i = 0; i < method.Attributes.Length; i++)
-		{
-			method.Attributes[i] = ReadAttribute();
-		}
-
-		return method;
-	}
-
-	public BinaryReader Reader { get; init; }
-}
-
-public class JStringReader
-{
-	public JStringReader(string str, int start = 0)
-	{
-		String = str;
-		Index = 0;
-	}
-
-	public void Skip(int count = 1)
-	{
-		Index += count;
-	}
-
-	public int Peek()
-	{
-		if (EOF)
-			return -1;
-		return String[Index];
-	}
-
-	public int Read()
-	{
-		if (EOF)
-			return -1;
-		return String[Index++];
-	}
-
-	public int Read(char[] buffer, int write_index, int count)
-	{
-		if (EOF)
-			return 0;
-
-		char[] chars = String.ToCharArray(Index, Math.Min(SpaceLeft, count));
-		Array.Copy(chars, 0, buffer, write_index, chars.Length);
-		Index += chars.Length;
-		return chars.Length;
-	}
-
-	public string Read(int count)
-	{
-		if (EOF)
-			return "";
-		count = Math.Min(SpaceLeft, count);
-		Index += count;
-		return String.Substring(Index - count, count);
-	}
-
-	public int IndexOf(char value)
-	{
-		return String.IndexOf(value, Index);
-	}
-
-	public int IndexOf(string value)
-	{
-		return String.IndexOf(value, Index);
-	}
-
-	public int LastIndexOf(char value)
-	{
-		return String.LastIndexOf(value, Index);
-	}
-
-	public int LastIndexOf(string value)
-	{
-		return String.LastIndexOf(value, Index);
-	}
-
-	public int GoToIndexOf(char value)
-	{
-		int index = String.IndexOf(value, Index);
-		if (index == -1)
-			Index = String.Length;
-		Index = index;
-		return Index;
-	}
-
-	public int GoToIndexOf(string value)
-	{
-		int index = String.IndexOf(value, Index);
-		if (index == -1)
-			Index = String.Length;
-		Index = index;
-		return Index;
-	}
-
-	public int GoToLastIndexOf(char value)
-	{
-		int index = String.LastIndexOf(value, Index);
-		if (index == -1)
-			Index = String.Length;
-		Index = index;
-		return Index;
-	}
-
-	public int GoToLastIndexOf(string value)
-	{
-		int index = String.LastIndexOf(value, Index);
-		if (index == -1)
-			Index = String.Length;
-		Index = index;
-		return Index; ;
-	}
-
-	/// <summary>
-	/// skips all repeats of 'value'
-	/// </summary>
-	/// <param name="character">the character to be skipped</param>
-	/// <returns>the number of characters skipped</returns>
-	/// <example> in the string 'aaaab', the return value for SkipCount('a') will be 4 and the read position will be at the 'b' </example>
-	public int SkipCount(char character)
-	{
-		if (EOF)
-			return 0;
-		int count = 0;
-		while (String[Index + count] == character)
-		{
-			count++;
-		}
-		Index += count;
-		return count;
-	}
-
-	/// <summary>
-	/// reads until the predicate is satisfied, stops the reader at the character satisfying the predicate
-	/// </summary>
-	/// <param name="predicate"></param>
-	/// <returns>the read string</returns>
-	public string ReadUntil(Predicate<char> predicate)
-	{
-		int count = 0;
-		while (!EOF)
-		{
-			if (predicate(String[Index + count]))
-				break;
-			count++;
-		}
-		return Read(count);
-	}
-
-	public string String { get; init; }
-	private int _index;
-	public int Index
-	{
-		get => _index;
-		set
-		{
-			if (value < 0)
-				throw new ArgumentOutOfRangeException(nameof(value), "negative index");
-
-			if (value > String.Length)
-				throw new ArgumentOutOfRangeException(nameof(value), "overflow index");
-
-			_index = value;
-		}
-	}
-
-	public static implicit operator bool(JStringReader reader)
-	{
-		return !reader.EOF;
-	}
-
-	public int SpaceLeft { get => String.Length - Index; }
-	public bool EOF { get => String.Length == Index; }
-}
-
 static public class JDisassembler
 {
 
-	public static string Decompile(BinaryReader stream, out Disassembly disassembly)
+	public static string Disassemble(BinaryReader stream, out Disassembly disassembly)
 	{
 		if (stream == null)
 		{
-			throw new ArgumentNullException("stream");
+			throw new ArgumentNullException(nameof(stream));
 		}
 
 		long MemUsagePrivate = 0;
@@ -1739,11 +730,19 @@ static public class JDisassembler
 			MemUsagePaged = process.PagedMemorySize64;
 		}
 
+    StringWriter build_log = new();
 
-		disassembly = new Disassembly();
-		JReader reader = new(stream);
+    disassembly = new Disassembly
+    {
+      Logger = build_log
+    };
 
-		uint signature = reader.ReadU32BE();
+    JReader reader = new(stream)
+    {
+      Logger = build_log
+    };
+
+    uint signature = reader.ReadU32BE();
 
 
 		// invalid sign
@@ -1759,7 +758,7 @@ static public class JDisassembler
 
 		for (uint i = 0; i < disassembly.Constants.Length; i++)
 		{
-			Console.Write($"READING CONST[{i + 1}] ");
+			build_log.Write($"READING CONST[{i + 1}] ");
 			Constant constant = reader.ReadConstant();
 			disassembly.Constants[i] = constant;
 			if (constant.type == ConstantType.Double || constant.type == ConstantType.Long)
@@ -1775,14 +774,14 @@ static public class JDisassembler
 
 		for (uint i = 0; i < errors.Length; i++)
 		{
-			Console.WriteLine($"Error On Constant {errors[i].Index}: {errors[i].Message}");
+			build_log.WriteLine($"Error On Constant {errors[i].Index}: {errors[i].Message}");
 		}
 #endif
 
 		disassembly.AccessFlags = (ClassAccessFlags)reader.ReadU16BE();
 		disassembly.ThisClass = reader.ReadU16BE();
 		disassembly.SuperClass = reader.ReadU16BE();
-		Console.WriteLine($"Class name: {disassembly.Constants[disassembly.ThisClass - 1].String} : {disassembly.Constants[disassembly.SuperClass - 1].String}");
+		build_log.WriteLine($"Class name: {disassembly.Constants[disassembly.ThisClass - 1].String} : {disassembly.Constants[disassembly.SuperClass - 1].String}");
 
 
 		disassembly.Interfaces = new ushort[reader.ReadU16BE()];
@@ -1817,7 +816,7 @@ static public class JDisassembler
 			Attribute attr = reader.ReadAttribute();
 			attr.Name = disassembly.Constants[attr.NameIndex - 1].String;
 			disassembly.Attributes[i] = attr;
-			Console.WriteLine($"attribute \"{attr.Name}\": {attr._data.Length} bytes");
+			build_log.WriteLine($"attribute \"{attr.Name}\": {attr._data.Length} bytes");
 		}
 
 		disassembly.PostProcess();
@@ -1826,20 +825,16 @@ static public class JDisassembler
 
 		using (Process process = Process.GetCurrentProcess())
 		{
-			Console.WriteLine($"memory usage [private]: {process.PrivateMemorySize64 / (1 << 20)}MB");
-			Console.WriteLine($"memory usage [paged]: {process.PagedMemorySize64 / (1 << 20)}MP");
-			Console.WriteLine($"disassembly memory usage [private]: {(process.PrivateMemorySize64 - MemUsagePrivate) / (1 << 20)}MB");
-			Console.WriteLine($"disassembly memory usage [paged]: {(process.PagedMemorySize64 - MemUsagePaged) / (1 << 20)}MP");
+			build_log.WriteLine($"memory usage [private]: {process.PrivateMemorySize64 / (1 << 20)}MB");
+			build_log.WriteLine($"memory usage [paged]: {process.PagedMemorySize64 / (1 << 20)}MP");
+			build_log.WriteLine($"disassembly memory usage [private]: {(process.PrivateMemorySize64 - MemUsagePrivate) / (1 << 20)}MB");
+			build_log.WriteLine($"disassembly memory usage [paged]: {(process.PagedMemorySize64 - MemUsagePaged) / (1 << 20)}MP");
 		}
 
 
-
-		return string.Empty;
+    reader.Logger = null;
+    disassembly.Logger = null;
+		return build_log.ToString();
 	}
-
-}
-
-static public class JSL
-{
 
 }

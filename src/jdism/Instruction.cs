@@ -570,14 +570,14 @@ public struct Instruction
 			{
 				// skip 4 bytes
 				reader.ReadInt();
-				Console.WriteLine($"encountred a table switch: {reader.ReadInt()}, {reader.ReadInt()}, {reader.ReadInt()}");
+				// Console.WriteLine($"encountred a table switch: {reader.ReadInt()}, {reader.ReadInt()}, {reader.ReadInt()}");
 				break;
 			}
 			case VMOpCode.Lookupswitch:
 			{
 				// skip 4 bytes
 				reader.ReadInt();
-				Console.WriteLine($"encountred a lookup switch: {reader.ReadInt()}, {reader.ReadInt()}, {reader.ReadInt()}");
+				// Console.WriteLine($"encountred a lookup switch: {reader.ReadInt()}, {reader.ReadInt()}, {reader.ReadInt()}");
 				break;
 			}
 			case VMOpCode.Wide:
@@ -585,7 +585,7 @@ public struct Instruction
 				return ReadWide(reader);
 			}
 			default:
-				Console.WriteLine($"couldn't read the instruction of type {type}, length = {length}");
+				// Console.WriteLine($"couldn't read the instruction of type {type}, length = {length}");
 				break;
 		}
 
