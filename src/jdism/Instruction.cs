@@ -594,7 +594,7 @@ public struct Instruction
 	}
 
 	public override string ToString() => ToString(null);
-	public string ToString(Constant[]? constants)
+	public string ToString(Constant[] constants)
 	{
 		if (OpCode >= VMOpCode._Max)
 		{
@@ -610,7 +610,7 @@ public struct Instruction
 		return builder.ToString();
 	}
 
-	public void StringfyOpCodeData(StringBuilder builder, Constant[]? constants)
+	public void StringfyOpCodeData(StringBuilder builder, Constant[] constants)
 	{
 		if (Data.Length == 0)
 			return;
@@ -619,15 +619,17 @@ public struct Instruction
 
 		string get_constant(int index)
 		{
+      index--;
+
 			// no constants, just the index
 			if (constants is null)
 				return index.ToString();
 
 			// out of range index
-			if (constants.Length <= index)
+			if (constants.Length <= index || index < 0)
 				return $"{index}:OOR";
 
-			var constant = constants[index - 1];
+			var constant = constants[index];
 			switch (constant.type)
 			{
 				case ConstantType.Integer:
@@ -788,7 +790,7 @@ public struct Instruction
 			}
 			case VMOpCode.Newarray:
 			{
-				builder.Append($"{(JTypeType)reader.ReadByte()}");
+				builder.Append($"{(JTypeKind)reader.ReadByte()}");
 				break;
 			}
 			case VMOpCode.Anewarray:

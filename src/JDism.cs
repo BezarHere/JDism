@@ -64,6 +64,7 @@ public class Disassembly : InnerLogger
 		string class_name = Constants[ThisClass - 1].String;
 		string super_name = Constants[SuperClass - 1].String;
 
+    builder.Append(AttributesToAnnotations(Attributes));
 		builder.Append("class ");
 		builder.Append(class_name).Append(' ');
 
@@ -83,7 +84,7 @@ public class Disassembly : InnerLogger
 					builder.Append(AttributesToAnnotations(field.Attributes));
 
 				AccessFlagsUtility.ToString((string s) => builder.Append(s).Append(' '), field.AccessFlags);
-				builder.Append(field.ResultType is not null ? field.ResultType.ToString() : "NULL").Append(' ');
+				builder.Append(field.InnerType.Valid ? field.InnerType.ToString() : "NULL").Append(' ');
 				builder.Append(field.Name).Append(";\n");
 			}
 		}
@@ -113,7 +114,7 @@ public class Disassembly : InnerLogger
 				else
 				{
 					// return
-					builder.Append(method.ResultType.ReturnType.ToString()).Append(' ');
+					builder.Append(method.InnerType.GetMethodReturnType().ToString()).Append(' ');
 					bool internal_name = method.Name.Contains('$');
 					if (internal_name)
 					{
@@ -125,18 +126,10 @@ public class Disassembly : InnerLogger
 				// parameters
 				builder.Append('(');
 
-				for (int i = 0; i < method.ResultType.MethodParameters.Length; i++)
-				{
-					JType method_param = method.ResultType.MethodParameters[i];
-					if (i > 0)
-					{
-						builder.Append(", ");
-					}
 
-					builder.Append(method_param.ToString());
-					builder.Append(' ');
-					builder.Append($"parameter_{i}");
-				}
+				builder.Append(
+          string.Join(", ", method.InnerType.GetMethodParameters())
+        );
 
 				builder.Append(')').Append(";\n");
 
@@ -534,7 +527,7 @@ public class Disassembly : InnerLogger
 		// TODO: check for errors/out of range indices
 		field.Name = Constants[field.NameIndex - 1].String;
 		JStringReader reader = new(Constants[field.DescriptorIndex - 1].String);
-		field.ResultType = new JType(reader);
+		field.InnerType = new JType(reader);
 	}
 
 	private void SetupMethod(Method method)
@@ -542,7 +535,7 @@ public class Disassembly : InnerLogger
 		// TODO: check for errors/out of range indices
 		method.Name = Constants[method.NameIndex - 1].String;
 		JStringReader reader = new(Constants[method.DescriptorIndex - 1].String);
-		method.ResultType = new JType(reader);
+		method.InnerType = new JType(reader);
 	}
 
 	private static void LoadCodeInfo(Attribute attribute)
@@ -641,7 +634,7 @@ public class Disassembly : InnerLogger
 
 				attribute.Signature.Index = reader.ReadUShort();
 
-				attribute.Signature.Value = Constants[attribute.Signature.Index - 1].String;
+				attribute.Signature.Value = new(Constants[attribute.Signature.Index - 1].String);
 			}
 
 		}

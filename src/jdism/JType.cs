@@ -1,283 +1,428 @@
+using System.ComponentModel.Design;
+using System.Diagnostics;
+using System.Drawing;
+using System.Reflection.Metadata.Ecma335;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace JDism;
 
-public class JType
+public enum JTypeKind : byte
 {
-	public JTypeType Type;
-	public ushort ArrayDimension = 0;
-	public string ObjectType = "";
-	public JType[] MethodParameters = [];
-	public JType ReturnType;
-	public JType[] Generics = [];
+  Unknown = 0,
+  // used for example to mark the end of type parameters in functions
+  Marker = (byte)'*',
+  TypeParameter = (byte)'T',
+  TypeParameterSpecification = (byte)':',
+  Array = (byte)'[',
+  Void = (byte)'V',
+  // signed byte
+  Byte = (byte)'B',
+  // utf16
+  Char = (byte)'C',
+  Double = (byte)'D',
+  Float = (byte)'F',
+  Int = (byte)'I',
+  Long = (byte)'J',
+  Object = (byte)'L',
+  Short = (byte)'S',
+  Boolean = (byte)'Z',
+  Method = (byte)'M',
+}
+
+public enum JTypeParseContext : byte
+{
+  Basic,
+  TypeParameter,
+  MethodParameter
+};
+
+public struct JType
+{
+  public JTypeKind Kind = JTypeKind.Unknown;
+  public string Name = "";
+  public JType[] Children = [];
+
+  public int ReadLength { get; init; }
+
+  public static readonly string[] sSpacialMethods = ["<init>", "<clinit>"];
+  public static readonly Dictionary<JTypeKind, string> sBasicTypeNames = new Dictionary<JTypeKind, string>{
+    {JTypeKind.Void, "void"},
+    {JTypeKind.Byte, "byte"},
+    {JTypeKind.Char, "char"},
+    {JTypeKind.Double, "double"},
+    {JTypeKind.Float, "float"},
+    {JTypeKind.Int, "int"},
+    {JTypeKind.Long, "long"},
+    {JTypeKind.Short, "short"},
+    {JTypeKind.Boolean, "boolean"},
+  };
+  public static readonly JTypeKind[] sBasicTypes = [.. sBasicTypeNames.Keys];
+
+  public readonly bool Valid { get => Kind != JTypeKind.Unknown && Kind != JTypeKind.Marker; }
+
+  public JType(JTypeKind kind = JTypeKind.Unknown)
+  {
+    this.Kind = kind;
+  }
+
+  public JType(string source, JTypeParseContext context = JTypeParseContext.Basic)
+  {
+    if (string.IsNullOrEmpty(source))
+    {
+      ReadLength = 0;
+      return;
+    }
+
+    foreach (string s in sSpacialMethods)
+    {
+      if (source.StartsWith(s))
+      {
+        Kind = JTypeKind.Method;
+        Name = s;
+        ReadLength = s.Length;
+        // Logger.WriteLine($"found a special function: {reader.String}");
+        return;
+      }
+    }
+
+    // array?
+    if (source[0] == '[')
+    {
+      Kind = JTypeKind.Array;
+      Children = [new JType(source[1..])];
+      Name = Children[0].Name + "[]";
+      ReadLength = 1 + Children[0].ReadLength;
+      return;
+    }
+
+    // basic types
+    foreach (JTypeKind t in sBasicTypes)
+    {
+      if (source[0] == (char)t)
+      {
+        Kind = t;
+        ReadLength = 1;
+        Name = sBasicTypeNames[t];
+        return;
+      }
+    }
+
+    // object? form is "LPackage/Module/Object;"
+    // try handle type parameters (template or generics)
+    if (source[0] == (char)JTypeKind.Object)
+    {
+      int name_end_pos = source.IndexOfAny([';', '<']);
+      if (name_end_pos == -1)
+      {
+        throw new InvalidDataException(
+          $"Object type name does not have a termination: \"{source}\""
+        );
+      }
+
+      if (name_end_pos == 1)
+      {
+        throw new InvalidDataException(
+          $"Object type is empty ('L;' or 'L<...>;'): \"{source}\""
+        );
+      }
+
+      Kind = JTypeKind.Object;
+      Children = [.. TryParseTypeParameters(source, name_end_pos)];
+      Name = source[1..name_end_pos];
+
+      if (Children.Length > 0)
+      {
+        string type_parameters_stringified = string.Join(
+          ", ",
+          from p in Children select p.ToString()
+        );
+        Name = $"{Name}<{type_parameters_stringified}>";
+      }
+
+      // handling type parameters
+      int type_parameters_read_length =
+        Children.Aggregate(0, (acc, t) => acc + t.ReadLength);
+
+      if (type_parameters_read_length > 0)
+      {
+        Debug.Assert(source[name_end_pos] == '<');
+
+        type_parameters_read_length += 2; // for the '<' and '>'
+
+        Debug.Assert(source[name_end_pos + type_parameters_read_length] == ';');
+      }
+
+      // note that type parameters read length will be zero
+      // if there is no type parameters
+      ReadLength = name_end_pos + type_parameters_read_length + 1;
+      return;
+    }
+
+    // functions only (to my knowledge) are prefixed with type parameters
+    if (source[0] == '<')
+    {
+      Children = [.. TryParseTypeParameters(source, 0), new(JTypeKind.Marker)];
+
+      int type_parameters_read_length =
+        Children.Aggregate(0, (acc, t) => acc + t.ReadLength);
+
+      if (type_parameters_read_length > 0)
+      {
+        type_parameters_read_length += 2; // for the '<' and '>'
+
+        // we SHOULD have a function after this
+        Debug.Assert(source.Length > type_parameters_read_length);
+        Debug.Assert(source[type_parameters_read_length] == '(');
+      }
+
+      ReadLength = type_parameters_read_length;
+      source = source[type_parameters_read_length..];
+    }
+
+    // function? form is "(IDLPackage/Module/Thread;)LPackage/Module/Object;"
+    if (source[0] == '(')
+    {
+      List<JType> parameters = [];
+
+      int index = 1;
+      while (index < source.Length)
+      {
+        if (source[index] == ')')
+        {
+          break;
+        }
+
+        parameters.Add(new JType(source[index..], JTypeParseContext.TypeParameter));
+        Debug.Assert(parameters.Last().ReadLength > 0);
+
+        index += parameters.Last().ReadLength;
+      }
+
+      Debug.Assert(source[index] == ')');
+      index++;
+
+      JType returnType = new(source[index..], JTypeParseContext.TypeParameter);
+
+      bool had_type_parameters = ReadLength != 0;
+      if (had_type_parameters)
+      {
+        Debug.Assert(Children.Length > 0);
+        Debug.Assert(Children.Last().Kind == JTypeKind.Marker);
+      }
+
+      Kind = JTypeKind.Method;
+
+      {
+        StringBuilder name_builder = new();
+
+        name_builder.Append(returnType.Name);
+
+        if (Children.Length > 0)
+        {
+          name_builder.Append('<');
+          name_builder.Append(string.Join(", ", from p in Children select p.Name));
+          name_builder.Append('>');
+        }
+
+        name_builder.Append('(');
+        int param_index = 0;
+        name_builder.Append(
+          string.Join(
+            ", ",
+            from p in parameters select p.Name + $" param_{param_index++}"
+          )
+        );
+        name_builder.Append(')');
+
+        Name = name_builder.ToString();
+      }
+
+      Children = [.. Children, returnType, .. parameters];
+      ReadLength += index + returnType.ReadLength;
+      return;
+    }
+
+    if (context != JTypeParseContext.TypeParameter)
+    {
+      throw new FormatException($"Unknown type format in context={context}: '{source}'");
+    }
+
+    // context type parameter VVV
+
+    Range tpd_range = TryParseTypeParameterDeclarationName(source, 0);
+    if (tpd_range.End.Value > tpd_range.Start.Value)
+    {
+      Debug.Assert(source[tpd_range.End] == ':');
+
+      Kind = JTypeKind.TypeParameterSpecification;
+      Children = [new(source[(tpd_range.End.Value + 1)..])];
+      Name = $"{source[tpd_range]} extends {Children[0].Name}";
+
+      int range_length = tpd_range.End.Value - tpd_range.Start.Value;
+      ReadLength = range_length + 1 + Children[0].ReadLength;
+      return;
+    }
+
+    if (source[0] == '*')
+    {
+      Kind = JTypeKind.TypeParameter;
+      Name = "?";
+      Children = [];
+      ReadLength = 1;
+      return;
+    }
+
+    if (source[0] == '+' || source[0] == '-')
+    {
+      Kind = JTypeKind.TypeParameter;
+      string super_or_extend = source[0] == '+' ? "extends" : "super";
+      Children = [new(source[1..], JTypeParseContext.Basic)];
+      Name = $"? {super_or_extend} {Children[0].Name}";
+      ReadLength = 1 + Children[0].ReadLength;
+      return;
+    }
+
+    if (source[0] == 'T')
+    {
+      int end_index = source.IndexOf(';');
+      if (end_index == -1)
+      {
+        throw new FormatException(
+          $"Expecting a type parameter name end (valid ex. 'TT;'): source={source}"
+        );
+      }
+
+      if (end_index == 1)
+      {
+        throw new FormatException(
+          $"Invalid a type parameter name end (valid ex. 'TE;', found 'T;'): source={source}"
+        );
+      }
+
+      if (!ValidTypeParameterName(source, 1, end_index))
+      {
+        throw new FormatException(
+          $"Invalid type parameter from {1} to {end_index}, "
+          + $"name='{source[1..end_index]}', source='{source}'"
+        );
+      }
+
+      Kind = JTypeKind.TypeParameter;
+      Name = source[1..end_index];
+      Children = [];
+      ReadLength = end_index + 1;
+      return;
+    }
+
+    throw new FormatException($"Unhandled type format in context={context}: '{source}'");
+  }
+
+  public JType(JStringReader reader)
+    : this(reader.String[reader.Index..])
+  {
+    _ = reader.Read(ReadLength);
+  }
+
+  public override readonly string ToString() => Name;
+
+  public readonly string GetObjectName()
+  {
+    return Name[(Name.LastIndexOf('/') + 1)..];
+  }
+
+  public readonly int GetMethodMarkerIndex()
+  {
+    return Array.IndexOf(Children, (JType i) => i.Kind == JTypeKind.Marker);
+  }
+
+  public readonly JType GetMethodReturnType()
+  {
+    return Children[GetMethodMarkerIndex() + 1];
+  }
 
 
-	public JType()
-	{
-		Type = JTypeType.Object;
-	}
 
-	public JType(JStringReader reader)
-	{
-		if (reader.EOF) return;
+  public readonly IEnumerable<JType> GetMethodParameters()
+  {
+    int first_parameter_index = GetMethodMarkerIndex() + 2;
+    if (first_parameter_index >= Children.Length)
+    {
+      return [];
+    }
 
-		if (reader.String.StartsWith("<init>") || reader.String.StartsWith("<cinit>"))
-		{
-			Type = JTypeType.Method;
-			// Logger.WriteLine($"found a special function: {reader.String}");
-			return;
-		}
+    return Children.Skip(first_parameter_index);
+  }
 
-		// check for arrays
-		ArrayDimension = (ushort)reader.SkipCount('[');
+  private static bool IdentifierCharPredicate(char c)
+  {
+    return char.IsLetter(c) || char.IsDigit(c) || c == '_';
+  }
 
-		switch (reader.Read())
-		{
-			case 'V':
-			{
-				Type = JTypeType.Void;
-				break;
-			}
-			case 'B':
-			{
-				Type = JTypeType.Byte;
-				break;
-			}
-			case 'C':
-			{
-				Type = JTypeType.Char;
-				break;
-			}
-			case 'D':
-			{
-				Type = JTypeType.Double;
-				break;
-			}
-			case 'F':
-			{
-				Type = JTypeType.Float;
-				break;
-			}
-			case 'I':
-			{
-				Type = JTypeType.Int;
-				break;
-			}
-			case 'J':
-			{
-				Type = JTypeType.Long;
-				break;
-			}
-			case 'S':
-			{
-				Type = JTypeType.Short;
-				break;
-			}
-			case 'Z':
-			{
-				Type = JTypeType.Boolean;
-				break;
-			}
-			// TYPE
-			case 'L':
-			{
-				Type = JTypeType.Object;
+  private static bool ValidTypeParameterName(string source, int start, int end)
+  {
+    for (int i = start; i < end; i++)
+    {
+      if (!IdentifierCharPredicate(source[i]))
+      {
+        return false;
+      }
+    }
 
-				int semicolon_pos = reader.IndexOf(';');
-				if (semicolon_pos == -1)
-				{
-					throw new InvalidDataException($"\nObject Type Does Not have The Terminating Semicolon: \"{reader}\"");
-				}
+    return true;
+  }
 
-				ObjectType = reader.ReadUntil(c => c == ';');
-				reader.Skip(); // skip ';'
+  private static IEnumerable<JType> FindTypeParameters(string source, ref int index)
+  {
+    int angle_bracket_index = source.IndexOf('<', index);
+    if (angle_bracket_index == -1)
+    {
+      return null;
+    }
 
+    index += angle_bracket_index;
 
+    return TryParseTypeParameters(source, index);
+  }
 
-				break;
-			}
-			// method
-			case '(':
-			{
-				Type = JTypeType.Method;
+  private static IEnumerable<JType> TryParseTypeParameters(string source, int index)
+  {
+    if (source[index] != '<')
+    {
+      yield break;
+    }
 
-				int end_para = reader.IndexOf(')');
-				// no closing parenthesis
-				if (end_para == -1)
-				{
-					throw new InvalidDataException($"Ill-Formed Method JType: \"{reader}\"");
-				}
+    index += 1;
+    while (index < source.Length)
+    {
+      if (source[index] == '>')
+      {
+        break;
+      }
 
+      JType type = new(source[index..], JTypeParseContext.TypeParameter);
+      Debug.Assert(type.ReadLength > 0);
 
-				// read every thing between the '(' & ')'
-				string parameters_typing = reader.ReadUntil(c => c == ')');
-				reader.Skip(); // skip ')'
+      index += type.ReadLength;
+      yield return type;
+    }
 
-				try
-				{
-					ReturnType = new JType(reader);
-				}
-				catch (Exception exc)
-				{
-					throw new FormatException(
-            $"Error While Parsing Return Type For Method JType: \"{reader}\", old_exc={exc}"
-          );
-				}
+    yield break;
+  }
 
-				List<JType> parameters = new(8);
-				JStringReader parameters_reader = new(parameters_typing);
+  private static Range TryParseTypeParameterDeclarationName(string source, int index)
+  {
+    int colon_index = source.IndexOf(':', index);
+    if (colon_index <= index)
+    {
+      return 0..0;
+    }
 
-				while (parameters_reader) // not EOF
-				{
-					// TODO: CATCH EXCEPTIONS FOR MORE DETAILS
-					JType type = new(parameters_reader);
+    if (!ValidTypeParameterName(source, index, colon_index))
+    {
+      return 0..0;
+    }
 
-					parameters.Add(type);
-				}
-
-				MethodParameters = parameters.ToArray();
-
-				break;
-			}
-			default:
-			{
-				throw new InvalidDataException($"Invalid Encoding For JType: \"{reader}\"");
-			}
-		}
-
-		if (reader.Peek() == '<')
-		{
-			reader.Skip(); // skips '<'
-
-			int end_arrow = reader.IndexOf('>');
-			if (end_arrow == -1)
-			{
-				throw new InvalidDataException($"Invalid generics {reader}");
-			}
-
-			string generics_raw = reader.ReadUntil(c => c == '>');
-			reader.Skip(); // skips '>'
-
-
-			List<JType> generics = new(8);
-
-			JStringReader generics_reader = new(generics_raw);
-			while (generics_reader) // not EOF
-			{
-				// TODO: CATCH EXCEPTIONS FOR MORE DETAILS
-				JType type = new(generics_reader);
-
-				generics.Add(type);
-			}
-
-			Generics = generics.ToArray();
-		}
-
-	}
-
-	public JType(JTypeType type, ushort arr_d, string obj_type)
-	{
-		Type = type;
-		ArrayDimension = arr_d;
-		ObjectType = obj_type;
-	}
-
-
-	public override string ToString()
-	{
-		StringBuilder stringBuilder = new(8);
-
-		switch (Type)
-		{
-			case JTypeType.Void:
-				stringBuilder.Append("void");
-				break;
-			case JTypeType.Byte:
-				stringBuilder.Append("byte");
-				break;
-			case JTypeType.Char:
-				stringBuilder.Append("char");
-				break;
-			case JTypeType.Double:
-				stringBuilder.Append("double");
-				break;
-			case JTypeType.Float:
-				stringBuilder.Append("float");
-				break;
-			case JTypeType.Int:
-				stringBuilder.Append("int");
-				break;
-			case JTypeType.Long:
-				stringBuilder.Append("long");
-				break;
-			case JTypeType.Object:
-				stringBuilder.Append(GetSimplifiedObjectType());
-				break;
-			case JTypeType.Short:
-				stringBuilder.Append("short");
-				break;
-			case JTypeType.Boolean:
-				stringBuilder.Append("boolean");
-				break;
-			case JTypeType.Method:
-				// TODO?
-				stringBuilder.Append($"Function<{ReturnType?.ToString()}, ...>");
-				break;
-			default:
-				stringBuilder.Append("Object");
-				break;
-		}
-
-		if (Generics is not null && Generics.Length != 0)
-		{
-			stringBuilder.Append('<');
-			for (int i = 0; i < Generics.Length; i++)
-			{
-				if (i > 0)
-				{
-					stringBuilder.Append(", ");
-				}
-
-				stringBuilder.Append(Generics[i].ToString());
-			}
-			stringBuilder.Append('>');
-		}
-
-		for (ushort i = 0; i < ArrayDimension; i++)
-			stringBuilder.Append("[]");
-
-		return stringBuilder.ToString();
-	}
-
-	// for object/ref types, returns the package that they belong to
-	// if the type is not an object/ref, an empty string will be returned
-	public string GetPackageName()
-	{
-		if (this.Type == JTypeType.Object)
-		{
-			return ObjectType.Substring(0, ObjectType.LastIndexOf('/'));
-		}
-		return string.Empty;
-	}
-
-	// for object/ref types, returns the package that they belong to
-	// if the type is not an object/ref, an empty string will be returned
-	public string GetObjectName()
-	{
-		if (this.Type == JTypeType.Object)
-		{
-			return ObjectType.Substring(ObjectType.LastIndexOf('/') + 1).Replace('$', '.');
-		}
-		return string.Empty;
-	}
-
-	// cleans the type path, for example java/lang/object -> object or net/example/com/SomeType -> SomeType
-	// subclasses 'Type$SubType' will be cleaned to 'Type.SubType'
-	public string GetSimplifiedObjectType()
-	{
-		if (GetPackageName().StartsWith("java/"))
-			return GetObjectName();
-		return ObjectType;
-	}
-
+    return new(index, colon_index);
+  }
 }

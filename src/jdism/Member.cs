@@ -6,8 +6,11 @@ public class Member<AccessFlagsT>
 	public ushort NameIndex;
 	public string Name = "";
 	public ushort DescriptorIndex;
-	public JType ResultType = new();
+	public JType InnerType = new();
 	public Attribute[] Attributes = [];
 
-  
+  public override string ToString()
+  {
+    return "";
+  }
 }

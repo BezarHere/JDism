@@ -38,7 +38,7 @@ public class Attribute
 	public struct SignatureInfo
 	{
 		public ushort Index;
-		public string Value;
+		public JType Value;
 	}
 	public record ExceptionRecord(ushort StartPc, ushort EndPc, ushort HandlerPc, ushort CatchType);
 
