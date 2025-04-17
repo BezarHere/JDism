@@ -129,7 +129,7 @@ public struct JType
 
       Kind = JTypeKind.Object;
       Children = [.. TryParseTypeParameters(source, name_end_pos)];
-      Name = source[1..name_end_pos];
+      Name = source[1..name_end_pos].Replace('$', '.');
 
       if (Children.Length > 0)
       {
@@ -359,11 +359,12 @@ public struct JType
     return char.IsLetter(c) || char.IsDigit(c) || c == '_';
   }
 
-  private static bool ValidTypeParameterName(string source, int start, int end)
+  private static bool ValidTypeParameterName(string source, int start, int end,
+                                             bool is_decl = false)
   {
     for (int i = start; i < end; i++)
     {
-      if (!IdentifierCharPredicate(source[i]))
+      if ((is_decl && source[i] == '$') || !IdentifierCharPredicate(source[i]))
       {
         return false;
       }
@@ -418,7 +419,7 @@ public struct JType
       return 0..0;
     }
 
-    if (!ValidTypeParameterName(source, index, colon_index))
+    if (!ValidTypeParameterName(source, index, colon_index, true))
     {
       return 0..0;
     }
