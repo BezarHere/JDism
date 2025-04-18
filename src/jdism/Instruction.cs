@@ -453,7 +453,7 @@ public readonly struct InstructionParameter(int value, byte size)
   {
     byte[] size_map = sParametersSizeMap[op_code];
     int alignment = OpCodeDataAlignment(op_code);
-    int padding = (alignment - (index % alignment)) % alignment;
+    int padding = alignment == 0 ? 0 : (alignment - (index % alignment)) % alignment;
     index += padding;
 
     if (size_map is null)
@@ -622,21 +622,44 @@ public readonly struct Instruction(VMOpCode op_code, IEnumerable<InstructionPara
 
   public static Instruction Read(ByteReader reader)
   {
-    VMOpCode type = ReadOpCode(reader);
+    var result = Read(reader.Bytes, reader.Position, out int read_length);
+    _ = reader.Read(read_length);
+    return result;
+  }
+
+  public static Instruction Read(byte[] data, int index, out int read_length)
+  {
+    VMOpCode type = ReadOpCode(data[index]);
+    index++;
+
     if (type == VMOpCode._Invalid)
     {
+      read_length = 1;
       return new();
     }
 
-    var (parameters, read_length) = InstructionParameter.Parse(
+    var (parameters, data_read_length) = InstructionParameter.Parse(
       type,
-      reader.Bytes,
-      reader.Position
+      data,
+      index
     );
 
-    _ = reader.Read(read_length);
+    read_length = data_read_length + 1;
 
     return new Instruction(type, parameters);
+  }
+
+  public static IEnumerable<Instruction> ReadAll(byte[] data)
+  {
+    int index = 0;
+    while (index < data.Length)
+    {
+      // error handling...
+      var inst = Read(data, index, out int read_length);
+      index += read_length;
+
+      yield return inst;
+    }
   }
 
   public override string ToString()

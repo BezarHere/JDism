@@ -1,8 +1,4 @@
-using System.ComponentModel.Design;
 using System.Diagnostics;
-using System.Drawing;
-using System.Reflection.Metadata.Ecma335;
-using System.Security.Cryptography;
 using System.Text;
 
 namespace JDism;
@@ -14,6 +10,8 @@ public enum JTypeKind : byte
   Marker = (byte)'*',
   TypeParameter = (byte)'T',
   TypeParameterSpecification = (byte)':',
+  Class = (byte)'X',
+
   Array = (byte)'[',
   Void = (byte)'V',
   // signed byte
@@ -34,16 +32,24 @@ public enum JTypeParseContext : byte
 {
   Basic,
   TypeParameter,
-  MethodParameter
+  MethodParameter,
+  Class
 };
 
 public struct JType
 {
+  static class Globals
+  {
+    public static bool StripObjectNames = true;
+  }
+
   public JTypeKind Kind = JTypeKind.Unknown;
   public string Name = "";
   public JType[] Children = [];
 
   public int ReadLength { get; init; }
+
+  
 
   public static readonly string[] sSpacialMethods = ["<init>", "<clinit>"];
   public static readonly Dictionary<JTypeKind, string> sBasicTypeNames = new Dictionary<JTypeKind, string>{
@@ -96,6 +102,25 @@ public struct JType
       return;
     }
 
+    // type parameter specification can be just like a basic type
+    // ex: boolean is 'Z', but a type parameter specification can be 'Z:Ljava/lang/object'
+    if (context == JTypeParseContext.TypeParameter)
+    {
+      Range tpd_range = TryParseTypeParameterDeclarationName(source, 0);
+      if (tpd_range.End.Value > tpd_range.Start.Value)
+      {
+        Debug.Assert(source[tpd_range.End] == ':');
+
+        Kind = JTypeKind.TypeParameterSpecification;
+        Children = [new(source[(tpd_range.End.Value + 1)..])];
+        Name = $"{source[tpd_range]} extends {Children[0].Name}";
+
+        int range_length = tpd_range.End.Value - tpd_range.Start.Value;
+        ReadLength = range_length + 1 + Children[0].ReadLength;
+        return;
+      }
+    }
+
     // basic types
     foreach (JTypeKind t in sBasicTypes)
     {
@@ -106,6 +131,68 @@ public struct JType
         Name = sBasicTypeNames[t];
         return;
       }
+    }
+
+    // functions only (to my knowledge) are prefixed with type parameters
+    if (source[0] == '<')
+    {
+      Children = [.. TryParseTypeParameters(source, 0), new(JTypeKind.Marker)];
+
+      int type_parameters_read_length =
+        Children.Aggregate(0, (acc, t) => acc + t.ReadLength);
+
+      if (type_parameters_read_length > 0)
+      {
+        type_parameters_read_length += 2; // for the '<' and '>'
+
+        // we SHOULD have either a function after this
+        // or a superclass,..interfaces depending on context
+        Debug.Assert(source.Length > type_parameters_read_length);
+        char expected_after = context == JTypeParseContext.Class ? 'L' : '(';
+        Debug.Assert(source[type_parameters_read_length] == expected_after);
+      }
+
+      ReadLength = type_parameters_read_length;
+      source = source[type_parameters_read_length..];
+    }
+
+    // class signature
+    if (context == JTypeParseContext.Class && source[0] == (char)JTypeKind.Object)
+    {
+      // and the interfaces
+      List<JType> super_classes = [];
+
+      int index = 0;
+      while (index < source.Length)
+      {
+        super_classes.Add(new(source[index..], JTypeParseContext.Basic));
+        Debug.Assert(super_classes.Last().ReadLength != 0);
+        index += super_classes.Last().ReadLength;
+      }
+      
+      Kind = JTypeKind.Class;
+
+      {
+        StringBuilder builder = new();
+        builder.Append("[CLASS]");
+        if (Children.Length > 0)
+        {
+          builder.Append('<');
+          builder.Append(string.Join(", ", Children));
+          builder.Append('>');
+        }
+
+        builder.Append(" extends ");
+        builder.Append(super_classes[0]);
+        builder.Append(" implements ");
+        builder.Append(string.Join(", ", super_classes[1..]));
+
+        Name = builder.ToString();
+      }
+
+      Children = [..Children, ..super_classes];
+      ReadLength += source.Length;
+      return;
     }
 
     // object? form is "LPackage/Module/Object;"
@@ -130,6 +217,12 @@ public struct JType
       Kind = JTypeKind.Object;
       Children = [.. TryParseTypeParameters(source, name_end_pos)];
       Name = source[1..name_end_pos].Replace('$', '.');
+
+      if (Globals.StripObjectNames)
+      {
+        int last_slash = Name.LastIndexOf('/');
+        Name = Name[(last_slash + 1)..];
+      }
 
       if (Children.Length > 0)
       {
@@ -157,27 +250,6 @@ public struct JType
       // if there is no type parameters
       ReadLength = name_end_pos + type_parameters_read_length + 1;
       return;
-    }
-
-    // functions only (to my knowledge) are prefixed with type parameters
-    if (source[0] == '<')
-    {
-      Children = [.. TryParseTypeParameters(source, 0), new(JTypeKind.Marker)];
-
-      int type_parameters_read_length =
-        Children.Aggregate(0, (acc, t) => acc + t.ReadLength);
-
-      if (type_parameters_read_length > 0)
-      {
-        type_parameters_read_length += 2; // for the '<' and '>'
-
-        // we SHOULD have a function after this
-        Debug.Assert(source.Length > type_parameters_read_length);
-        Debug.Assert(source[type_parameters_read_length] == '(');
-      }
-
-      ReadLength = type_parameters_read_length;
-      source = source[type_parameters_read_length..];
     }
 
     // function? form is "(IDLPackage/Module/Thread;)LPackage/Module/Object;"
@@ -249,20 +321,6 @@ public struct JType
     }
 
     // context type parameter VVV
-
-    Range tpd_range = TryParseTypeParameterDeclarationName(source, 0);
-    if (tpd_range.End.Value > tpd_range.Start.Value)
-    {
-      Debug.Assert(source[tpd_range.End] == ':');
-
-      Kind = JTypeKind.TypeParameterSpecification;
-      Children = [new(source[(tpd_range.End.Value + 1)..])];
-      Name = $"{source[tpd_range]} extends {Children[0].Name}";
-
-      int range_length = tpd_range.End.Value - tpd_range.Start.Value;
-      ReadLength = range_length + 1 + Children[0].ReadLength;
-      return;
-    }
 
     if (source[0] == '*')
     {

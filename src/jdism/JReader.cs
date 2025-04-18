@@ -159,22 +159,6 @@ public class JReader : InnerLogger
 		return constant;
 	}
 
-	public Attribute ReadAttribute()
-	{
-		Attribute attributeInfo = new()
-		{
-			NameIndex = ReadU16BE()
-		};
-
-		uint data_len = ReadU32BE();
-		attributeInfo._data = Reader.ReadBytes((int)data_len);
-		if (attributeInfo._data.Length < data_len)
-		{
-			//! NOT ENOUGH BYTES
-		}
-		return attributeInfo;
-	}
-
 	public Field ReadField()
 	{
 		Field field = new()
@@ -183,13 +167,6 @@ public class JReader : InnerLogger
 			NameIndex = ReadU16BE(),
 			DescriptorIndex = ReadU16BE()
 		};
-
-		field.Attributes = new Attribute[ReadU16BE()];
-
-		for (uint i = 0; i < field.Attributes.Length; i++)
-		{
-			field.Attributes[i] = ReadAttribute();
-		}
 
 		return field;
 	}
@@ -202,13 +179,6 @@ public class JReader : InnerLogger
 			NameIndex = ReadU16BE(),
 			DescriptorIndex = ReadU16BE()
 		};
-
-		method.Attributes = new Attribute[ReadU16BE()];
-
-		for (uint i = 0; i < method.Attributes.Length; i++)
-		{
-			method.Attributes[i] = ReadAttribute();
-		}
 
 		return method;
 	}
