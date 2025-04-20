@@ -2,7 +2,7 @@
 
 namespace JDism;
 
-static public class JDisassembler
+static class JDisassembler
 {
 
 	public static string Disassemble(BinaryReader stream, out Disassembly disassembly)
@@ -45,18 +45,9 @@ static public class JDisassembler
 		disassembly.VersionMinor = reader.ReadU16BE();
 		disassembly.VersionMajor = reader.ReadU16BE();
 
-		disassembly.Constants = new Constant[reader.ReadU16BE() - 1];
+		disassembly.DeserializeConstantsTable(reader);
 
-		for (uint i = 0; i < disassembly.Constants.Length; i++)
-		{
-			build_log.Write($"READING CONST[{i + 1}] ");
-			Constant constant = reader.ReadConstant();
-			disassembly.Constants[i] = constant;
-			if (constant.type == ConstantType.Double || constant.type == ConstantType.Long)
-			{
-				i++;
-			}
-		}
+		
 
 		disassembly.BuildCIRT();
 
@@ -72,7 +63,7 @@ static public class JDisassembler
 		disassembly.AccessFlags = (ClassAccessFlags)reader.ReadU16BE();
 		disassembly.ThisClass = reader.ReadU16BE();
 		disassembly.SuperClass = reader.ReadU16BE();
-		build_log.WriteLine($"Class name: {disassembly.Constants[disassembly.ThisClass - 1].String} : {disassembly.Constants[disassembly.SuperClass - 1].String}");
+		build_log.WriteLine($"Class name: {disassembly.Context.Constants[disassembly.ThisClass - 1].String} : {disassembly.Context.Constants[disassembly.SuperClass - 1].String}");
 
 
 		disassembly.Interfaces = new ushort[reader.ReadU16BE()];
@@ -83,28 +74,28 @@ static public class JDisassembler
 		}
 
 
-		disassembly.Fields = new Field[reader.ReadU16BE()];
+		disassembly.Context.Fields = new Field[reader.ReadU16BE()];
 
-		for (uint i = 0; i < disassembly.Fields.Length; i++)
+		for (uint i = 0; i < disassembly.Context.Fields.Length; i++)
 		{
-			disassembly.Fields[i] = reader.ReadField();
-      disassembly.Fields[i].Attributes = new JAttribute[reader.ReadU16BE()];
-      for (int j = 0; j < disassembly.Fields[i].Attributes.Length; j++)
+			disassembly.Context.Fields[i] = reader.ReadField();
+      disassembly.Context.Fields[i].Attributes = new JAttribute[reader.ReadU16BE()];
+      for (int j = 0; j < disassembly.Context.Fields[i].Attributes.Length; j++)
       {
-        disassembly.Fields[i].Attributes[j] = disassembly.ReadAttribute(reader);
+        disassembly.Context.Fields[i].Attributes[j] = disassembly.ReadAttribute(reader);
       }
 		}
 
 
-		disassembly.Methods = new Method[reader.ReadU16BE()];
+		disassembly.Context.Methods = new Method[reader.ReadU16BE()];
 
-		for (uint i = 0; i < disassembly.Methods.Length; i++)
+		for (uint i = 0; i < disassembly.Context.Methods.Length; i++)
 		{
-			disassembly.Methods[i] = reader.ReadMethod();
-      disassembly.Methods[i].Attributes = new JAttribute[reader.ReadU16BE()];
-      for (int j = 0; j < disassembly.Methods[i].Attributes.Length; j++)
+			disassembly.Context.Methods[i] = reader.ReadMethod();
+      disassembly.Context.Methods[i].Attributes = new JAttribute[reader.ReadU16BE()];
+      for (int j = 0; j < disassembly.Context.Methods[i].Attributes.Length; j++)
       {
-        disassembly.Methods[i].Attributes[j] = disassembly.ReadAttribute(reader);
+        disassembly.Context.Methods[i].Attributes[j] = disassembly.ReadAttribute(reader);
       }
 		}
 

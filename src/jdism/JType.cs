@@ -50,6 +50,7 @@ public struct JType
   public int ReadLength { get; init; }
 
   
+  public const string SpacialNamePlaceholder = "[NAME]";
 
   public static readonly string[] sSpacialMethods = ["<init>", "<clinit>"];
   public static readonly Dictionary<JTypeKind, string> sBasicTypeNames = new Dictionary<JTypeKind, string>{
@@ -174,7 +175,7 @@ public struct JType
 
       {
         StringBuilder builder = new();
-        builder.Append("[CLASS]");
+        builder.Append(SpacialNamePlaceholder);
         if (Children.Length > 0)
         {
           builder.Append('<');
@@ -289,6 +290,8 @@ public struct JType
         StringBuilder name_builder = new();
 
         name_builder.Append(returnType.Name);
+        name_builder.Append(' ');
+        name_builder.Append(SpacialNamePlaceholder);
 
         if (Children.Length > 0)
         {

@@ -2,16 +2,11 @@ using System.Text;
 
 namespace JDism;
 
-public class JReader : InnerLogger
+class JReader(BinaryReader br) : InnerLogger
 {
+  public BinaryReader Reader => br;
 
-
-	public JReader(BinaryReader br)
-	{
-		Reader = br;
-	}
-
-	public byte[] ReadBuffer(int length)
+  public byte[] ReadBuffer(int length)
 	{
 		byte[] data = new byte[length];
 		// FIXME: what to do if the buffer is not filled? throw an exception?
@@ -182,6 +177,4 @@ public class JReader : InnerLogger
 
 		return method;
 	}
-
-	public BinaryReader Reader { get; init; }
 }

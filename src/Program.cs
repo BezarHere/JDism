@@ -56,6 +56,8 @@ internal class Program
 
   static int Main(string[] args)
 	{
+    JAttribute.Run();
+
 		Console.WriteLine(base_path);
 		Console.WriteLine("STARTING");
 

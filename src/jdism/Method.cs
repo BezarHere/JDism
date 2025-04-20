@@ -2,11 +2,12 @@ using System.Text;
 
 namespace JDism;
 
-public class Method : Member<MethodAccessFlags>
+class Method : Member<MethodAccessFlags>
 {
 
-  protected override void WriteAccessFlags(StringBuilder builder)
+  protected override string BuildSource(SourceBuilder builder)
   {
-    AccessFlagsUtility.ToString(s => builder.Append(s).Append(' '), AccessFlags);
+    return builder.BuildMethod(AccessFlags);
   }
+
 }

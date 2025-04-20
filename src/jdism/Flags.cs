@@ -58,100 +58,100 @@ public enum ClassAccessFlags
 public static class AccessFlagsUtility
 {
 
-	public static void ToString(Action<string> loader, FieldAccessFlags accessFlags)
+	public static IEnumerable<string> ToString(FieldAccessFlags accessFlags)
 	{
 		if (accessFlags.HasFlag(FieldAccessFlags.Public))
 		{
-			loader("public");
+			yield return "public";
 		}
 		else if (accessFlags.HasFlag(FieldAccessFlags.Private))
 		{
-			loader("private");
+			yield return "private";
 		}
 		else if (accessFlags.HasFlag(FieldAccessFlags.Protected))
 		{
-			loader("protected");
+			yield return "protected";
 		}
 
 		if (accessFlags.HasFlag(FieldAccessFlags.Static))
 		{
-			loader("static");
+			yield return "static";
 		}
 
 		if (accessFlags.HasFlag(FieldAccessFlags.Final))
 		{
-			loader("final");
+			yield return "final";
 		}
 
 		if (accessFlags.HasFlag(FieldAccessFlags.Volatile))
 		{
-			loader("volatile");
+			yield return "volatile";
 		}
 
 		if (accessFlags.HasFlag(FieldAccessFlags.Transient))
 		{
-			loader("transient");
+			yield return "transient";
 		}
 	}
 
-	public static void ToString(Action<string> loader, MethodAccessFlags accessFlags)
+	public static IEnumerable<string> ToString(MethodAccessFlags accessFlags)
 	{
 		if (accessFlags.HasFlag(MethodAccessFlags.Public))
 		{
-			loader("public");
+			yield return "public";
 		}
 		else if (accessFlags.HasFlag(MethodAccessFlags.Private))
 		{
-			loader("private");
+			yield return "private";
 		}
 		else if (accessFlags.HasFlag(MethodAccessFlags.Protected))
 		{
-			loader("protected");
+			yield return "protected";
 		}
 
 		if (accessFlags.HasFlag(MethodAccessFlags.Static))
 		{
-			loader("static");
+			yield return "static";
 		}
 
 		if (accessFlags.HasFlag(MethodAccessFlags.Final))
 		{
-			loader("final");
+			yield return "final";
 		}
 
 		else if (accessFlags.HasFlag(MethodAccessFlags.Abstract))
 		{
-			loader("abstract");
+			yield return "abstract";
 		}
 	}
 
-	public static void ToString(Action<string> loader, ClassAccessFlags accessFlags)
+	public static IEnumerable<string> ToString(ClassAccessFlags accessFlags)
 	{
 		if (accessFlags.HasFlag(ClassAccessFlags.Public))
 		{
-			loader("public");
+			yield return "public";
 		}
 
 		if (accessFlags.HasFlag(ClassAccessFlags.Final))
 		{
-			loader("final");
+			yield return "final";
 		}
 
 		if (accessFlags.HasFlag(ClassAccessFlags.Enum))
 		{
-			loader("enum");
+			yield return "enum";
 		}
 		else if (accessFlags.HasFlag(ClassAccessFlags.Interface))
 		{
-			loader("interface");
+			yield return "interface";
 		}
 		else if (accessFlags.HasFlag(ClassAccessFlags.Abstract))
 		{
-			loader("abstract class");
+			yield return "abstract class";
 		}
 		else
 		{
-			loader("class");
+			yield return "class";
 		}
 	}
 

@@ -5,33 +5,33 @@ using Colussom;
 
 namespace JDism;
 
-public class Disassembly : InnerLogger
+class Disassembly : InnerLogger
 {
   public ushort VersionMinor;
   public ushort VersionMajor;
-  public Constant[] Constants;
   public ClassAccessFlags AccessFlags;
   public ushort ThisClass;
   public ushort SuperClass;
   public ushort[] Interfaces = [];
-  public Field[] Fields = [];
-  public Method[] Methods = [];
+
   public JAttribute[] Attributes = [];
+
+  public JContext Context;
 
   // constant index X (X for the class file) is Constant[ConstantIndexRoutingTable[X]]
   public ushort[] ConstantIndexRoutingTable = [];
 
   public Disassembly()
   {
-    Constants = [];
+    Context = new JContext();
   }
 
   public string GenerateSource()
   {
     StringBuilder builder = new(4096);
 
-    string class_name = Constants[ThisClass - 1].String;
-    string super_name = Constants[SuperClass - 1].String;
+    string class_name = Context.Constants[ThisClass - 1].String;
+    string super_name = Context.Constants[SuperClass - 1].String;
 
     foreach (JAttribute attr in Attributes)
     {
@@ -49,21 +49,14 @@ public class Disassembly : InnerLogger
 
     builder.Append("{\n");
 
-    if (Fields is not null)
+    foreach (Field field in Context.Fields ?? [])
     {
-      foreach (Field field in Fields)
-      {
-        builder.Append(field).AppendLine();
-      }
+      builder.Append(field.ToString(Context)).AppendLine();
     }
 
-    if (Methods is not null)
+    foreach (Method method in Context.Methods ?? [])
     {
-      foreach (Method method in Methods)
-      {
-        builder.Append(method).AppendLine();
-
-      }
+      builder.Append(method.ToString(Context)).AppendLine();
     }
 
     builder.Append('}');
@@ -73,12 +66,12 @@ public class Disassembly : InnerLogger
 
   public void BuildCIRT()
   {
-    if (Constants is null)
+    if (Context.Constants is null)
     {
       return;
     }
 
-    ConstantIndexRoutingTable = new ushort[Constants.Length + 1];
+    ConstantIndexRoutingTable = new ushort[Context.Constants.Length + 1];
     int offset = 1;
     for (int i = 0; i < ConstantIndexRoutingTable.Length; i++)
     {
@@ -92,14 +85,14 @@ public class Disassembly : InnerLogger
 
   public ConstantError[] ValidateConstantTable()
   {
-    if (Constants is null)
-      return Array.Empty<ConstantError>();
-    List<ConstantError> errors = new(2 + (Constants.Length >> 3));
-    ushort len = (ushort)Constants.Length;
+    if (Context.Constants is null)
+      return [];
+    List<ConstantError> errors = new(2 + Context.Constants.Length / 8);
+    ushort len = (ushort)Context.Constants.Length;
 
     for (ushort i = 0; i < len; i++)
     {
-      Constant constant = Constants[i];
+      Constant constant = Context.Constants[i];
 
       if (constant is null)
       {
@@ -284,28 +277,22 @@ public class Disassembly : InnerLogger
   {
     PostProcessConstants();
 
-    if (Fields is not null)
+    foreach (Field field in Context.Fields ?? [])
     {
-      foreach (Field field in Fields)
-      {
-        SetupField(field);
-      }
+      SetupField(field);
     }
 
-    if (Methods is not null)
+    foreach (Method method in Context.Methods ?? [])
     {
-      foreach (Method method in Methods)
-      {
-        SetupMethod(method);
-      }
+      SetupMethod(method);
     }
   }
 
   public void PostProcessConstants()
   {
-    for (uint i = 0; i < Constants.Length; i++)
+    for (uint i = 0; i < Context.Constants.Length; i++)
     {
-      Constant constant = Constants[i];
+      Constant constant = Context.Constants[i];
       if (constant.type == ConstantType.Long || constant.type == ConstantType.Double)
         i++;
 
@@ -332,21 +319,49 @@ public class Disassembly : InnerLogger
             break;
           }
         case ConstantType.Class:
+          {
+            constant.String = Context.Constants[constant.NameIndex - 1].String.Replace('$', '.');
+            Logger.WriteLine($"TYPE: \"{constant.String}\"");
+            break;
+          }
         case ConstantType.FieldReference:
         case ConstantType.MethodReference:
         case ConstantType.InterfaceMethodReference:
+          {
+            string class_name = Context.Constants[constant.ClassIndex - 1].String;
+            string name_type_name = Context.Constants[constant.NameTypeIndex - 1].String;
+            constant.String = $"{class_name}:{name_type_name}";
+            Logger.WriteLine($"REF: \"{constant.String}\"");
+            break;
+          }
         case ConstantType.StringReference:
           {
-            constant.String = Constants[constant.NameIndex - 1].String;
+            constant.String = $"&\"{Context.Constants[constant.NameIndex - 1].String}\"";
             Logger.WriteLine($"CONSTANT STRING: \"{constant.String}\"");
             break;
           }
         case ConstantType.NameTypeDescriptor:
           {
-            constant.String = $"{Constants[constant.DescriptorIndex - 1].String} {Constants[constant.NameIndex - 1].String}";
-            Logger.WriteLine($"CONSTANT STRING: \"{constant.String}\"");
+            SourceBuilder builder = new(
+              [],
+              Context.Constants[constant.NameIndex - 1].String,
+              new JType(Context.Constants[constant.DescriptorIndex - 1].String),
+              Context
+            );
+
+            if (builder.Type?.Kind == JTypeKind.Method)
+            {
+              constant.String = builder.BuildMethod(MethodAccessFlags.None);
+            }
+            else
+            {
+              constant.String = builder.BuildField(FieldAccessFlags.None);
+            }
+
+            Logger.WriteLine($"NAME-TYPE DESC: \"{constant.String}\"");
             break;
           }
+
         default: break;
       }
     }
@@ -356,25 +371,43 @@ public class Disassembly : InnerLogger
   {
     // the class constant table indices start at 1
     index--;
-    if (index >= Constants.Length)
+    if (index >= Context.Constants.Length)
       return false;
-    return Constants[index].type == type;
+    return Context.Constants[index].type == type;
   }
 
+  public void DeserializeConstantsTable(JReader reader)
+  {
+    int count = reader.ReadU16BE() - 1;
+    Constant[] constants = new Constant[count];
+
+    for (uint i = 0; i < count; i++)
+    {
+      Logger.Write($"READING CONST[{i + 1}] ");
+      Constant constant = reader.ReadConstant();
+      constants[i] = constant;
+      if (constant.type == ConstantType.Double || constant.type == ConstantType.Long)
+      {
+        i++;
+      }
+    }
+
+    Context.Constants = constants;
+  }
 
   private void SetupField(Field field)
   {
     // TODO: check for errors/out of range indices
-    field.Name = Constants[field.NameIndex - 1].String;
-    JStringReader reader = new(Constants[field.DescriptorIndex - 1].String);
+    field.Name = Context.Constants[field.NameIndex - 1].String;
+    JStringReader reader = new(Context.Constants[field.DescriptorIndex - 1].String);
     field.InnerType = new JType(reader);
   }
 
   private void SetupMethod(Method method)
   {
     // TODO: check for errors/out of range indices
-    method.Name = Constants[method.NameIndex - 1].String;
-    JStringReader reader = new(Constants[method.DescriptorIndex - 1].String);
+    method.Name = Context.Constants[method.NameIndex - 1].String;
+    JStringReader reader = new(Context.Constants[method.DescriptorIndex - 1].String);
     method.InnerType = new JType(reader);
   }
 
@@ -382,8 +415,8 @@ public class Disassembly : InnerLogger
   {
     int name_index = ByteConverter.ToShort_Big(data, 0) - 1;
 
-    Debug.Assert(name_index >= 0 && name_index < Constants.Length);
-    Debug.Assert(Constants[name_index].type == ConstantType.String);
+    Debug.Assert(name_index >= 0 && name_index < Context.Constants.Length);
+    Debug.Assert(Context.Constants[name_index].type == ConstantType.String);
 
 
     int data_len = ByteConverter.ToInt_Big(data, 2);
@@ -411,16 +444,16 @@ public class Disassembly : InnerLogger
   private JAttribute LoadAttribute(int name_index, byte[] data,
               JTypeParseContext context = JTypeParseContext.Basic)
   {
-    Debug.Assert(name_index > 0 && name_index < Constants.Length);
+    Debug.Assert(name_index > 0 && name_index < Context.Constants.Length);
 
-    string name = Constants[name_index].String;
+    string name = Context.Constants[name_index].String;
     var attr_info = JAttribute.FetchAttributeTypeInfo(name);
 
     return LoadAttribute(attr_info, data, context);
   }
 
 
-  public JAttribute LoadAttribute(JAttribute.AttributeTypeInfo info, byte[] data,
+  public JAttribute LoadAttribute(JAttribute.JAttributeTypeInfo info, byte[] data,
               JTypeParseContext context = JTypeParseContext.Basic)
   {
     if (info is null)
@@ -431,14 +464,14 @@ public class Disassembly : InnerLogger
     if (info.AttributeType == JAttributeType.ConstantValue)
     {
       int const_index = ByteConverter.ToUshort_Big(data, 0);
-      return new ConstantInfoJAttribute(Constants[const_index - 1], (ushort)const_index);
+      return new ConstantInfoJAttribute(Context.Constants[const_index - 1], (ushort)const_index);
     }
 
     if (info.AttributeType == JAttributeType.Signature)
     {
       int const_index = ByteConverter.ToUshort_Big(data, 0);
       return new SignatureJAttribute(
-        new JType(Constants[const_index - 1].String, context),
+        new JType(Context.Constants[const_index - 1].String, context),
         (ushort)const_index
       );
     }

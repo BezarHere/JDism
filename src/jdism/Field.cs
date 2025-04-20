@@ -2,10 +2,10 @@ using System.Text;
 
 namespace JDism;
 
-public class Field : Member<FieldAccessFlags>
+class Field : Member<FieldAccessFlags>
 {
-  protected override void WriteAccessFlags(StringBuilder builder)
+  protected override string BuildSource(SourceBuilder builder)
   {
-    AccessFlagsUtility.ToString(s => builder.Append(s).Append(' '), AccessFlags);
+    return builder.BuildField(AccessFlags);
   }
 }

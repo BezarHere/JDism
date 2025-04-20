@@ -2,6 +2,9 @@
 
 using Colussom;
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
+using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace JDism;
@@ -216,14 +219,38 @@ public enum VMOpCode : byte
 }
 
 
-public readonly struct InstructionParameter(int value, byte size)
+readonly struct InstructionParameter(int value, byte size)
 {
+  public enum PreviewType
+  {
+    Hidden = -1,
+    Basic, // just the value integer
+    Constant, // value is an index to a constant
+    Local, // value is an index to a local
+    JumpIndex,
+    FieldRef, // value is an index to a field ref in the constants
+    MethodRef, // value is an index to a method ref in the constants
+  }
+
+  public record ParameterPreview(byte Size, PreviewType Type)
+  {
+    public static implicit operator ParameterPreview((byte size, PreviewType type) tuple)
+    {
+      return new(tuple.size, tuple.type);
+    }
+
+    public static implicit operator ParameterPreview(byte size)
+    {
+      return new(size, PreviewType.Basic);
+    }
+  }
+
   public readonly int Value = value;
   public readonly byte Size = size;
 
   // null size map array indicate a complex instuction that can have dynamic size
   // depnding on the bytecode
-  public static readonly Dictionary<VMOpCode, byte[]> sParametersSizeMap = new(){
+  public static readonly Dictionary<VMOpCode, ParameterPreview[]> sParametersPreviews = new(){
     { VMOpCode.Nop,        []},
     { VMOpCode.AconstNull, []},
     { VMOpCode.IconstM1,   []},
@@ -243,15 +270,15 @@ public readonly struct InstructionParameter(int value, byte size)
 
     { VMOpCode.Bipush,     [1]},
     { VMOpCode.Sipush,     [2]},
-    { VMOpCode.Ldc,        [1]},
-    { VMOpCode.LdcW,       [2]},
-    { VMOpCode.Ldc2W,      [2]},
+    { VMOpCode.Ldc,        [(1, PreviewType.Constant)]},
+    { VMOpCode.LdcW,       [(2, PreviewType.Constant)]},
+    { VMOpCode.Ldc2W,      [(2, PreviewType.Constant)]},
 
-    {VMOpCode.Iload,       [1]},
-    {VMOpCode.Lload,       [1]},
-    {VMOpCode.Fload,       [1]},
-    {VMOpCode.Dload,       [1]},
-    {VMOpCode.Aload,       [1]},
+    {VMOpCode.Iload,       [(1, PreviewType.Local)]},
+    {VMOpCode.Lload,       [(1, PreviewType.Local)]},
+    {VMOpCode.Fload,       [(1, PreviewType.Local)]},
+    {VMOpCode.Dload,       [(1, PreviewType.Local)]},
+    {VMOpCode.Aload,       [(1, PreviewType.Local)]},
 
     {VMOpCode.Iload0,      []},
     {VMOpCode.Iload1,      []},
@@ -282,11 +309,11 @@ public readonly struct InstructionParameter(int value, byte size)
     {VMOpCode.Caload,      []},
     {VMOpCode.Saload,      []},
 
-    {VMOpCode.Istore,      [1]},
-    {VMOpCode.Lstore,      [1]},
-    {VMOpCode.Fstore,      [1]},
-    {VMOpCode.Dstore,      [1]},
-    {VMOpCode.Astore,      [1]},
+    {VMOpCode.Istore,      [(1, PreviewType.Local)]},
+    {VMOpCode.Lstore,      [(1, PreviewType.Local)]},
+    {VMOpCode.Fstore,      [(1, PreviewType.Local)]},
+    {VMOpCode.Dstore,      [(1, PreviewType.Local)]},
+    {VMOpCode.Astore,      [(1, PreviewType.Local)]},
 
     {VMOpCode.Istore0,     []},
     {VMOpCode.Istore1,     []},
@@ -362,7 +389,7 @@ public readonly struct InstructionParameter(int value, byte size)
     {VMOpCode.Ixor,        []},
     {VMOpCode.Lxor,        []},
 
-    {VMOpCode.Iinc,        [1, 1]},
+    {VMOpCode.Iinc,        [(1, PreviewType.Local), 1]},
 
     {VMOpCode.I2l,         []},
     {VMOpCode.I2f,         []},
@@ -385,23 +412,23 @@ public readonly struct InstructionParameter(int value, byte size)
     {VMOpCode.Dcmpl,       []},
     {VMOpCode.Dcmpg,       []},
 
-    {VMOpCode.Ifeq,        [2]},
-    {VMOpCode.Ifne,        [2]},
-    {VMOpCode.Iflt,        [2]},
-    {VMOpCode.Ifge,        [2]},
-    {VMOpCode.Ifgt,        [2]},
-    {VMOpCode.Ifle,        [2]},
-    {VMOpCode.IfIcmpeq,    [2]},
-    {VMOpCode.IfIcmpne,    [2]},
-    {VMOpCode.IfIcmplt,    [2]},
-    {VMOpCode.IfIcmpge,    [2]},
-    {VMOpCode.IfIcmpgt,    [2]},
-    {VMOpCode.IfIcmple,    [2]},
-    {VMOpCode.IfAcmpeq,    [2]},
-    {VMOpCode.IfAcmpne,    [2]},
-    {VMOpCode.Goto,        [2]},
-    {VMOpCode.Jsr,         [2]},
-    {VMOpCode.Ret,         [1]},
+    {VMOpCode.Ifeq,        [(2, PreviewType.JumpIndex)]},
+    {VMOpCode.Ifne,        [(2, PreviewType.JumpIndex)]},
+    {VMOpCode.Iflt,        [(2, PreviewType.JumpIndex)]},
+    {VMOpCode.Ifge,        [(2, PreviewType.JumpIndex)]},
+    {VMOpCode.Ifgt,        [(2, PreviewType.JumpIndex)]},
+    {VMOpCode.Ifle,        [(2, PreviewType.JumpIndex)]},
+    {VMOpCode.IfIcmpeq,    [(2, PreviewType.JumpIndex)]},
+    {VMOpCode.IfIcmpne,    [(2, PreviewType.JumpIndex)]},
+    {VMOpCode.IfIcmplt,    [(2, PreviewType.JumpIndex)]},
+    {VMOpCode.IfIcmpge,    [(2, PreviewType.JumpIndex)]},
+    {VMOpCode.IfIcmpgt,    [(2, PreviewType.JumpIndex)]},
+    {VMOpCode.IfIcmple,    [(2, PreviewType.JumpIndex)]},
+    {VMOpCode.IfAcmpeq,    [(2, PreviewType.JumpIndex)]},
+    {VMOpCode.IfAcmpne,    [(2, PreviewType.JumpIndex)]},
+    {VMOpCode.Goto,        [(2, PreviewType.JumpIndex)]},
+    {VMOpCode.Jsr,         [(2, PreviewType.JumpIndex)]},
+    {VMOpCode.Ret,         [(1, PreviewType.Local)]},
 
     {VMOpCode.Tableswitch,   null},
     {VMOpCode.Lookupswitch,  null},
@@ -413,45 +440,73 @@ public readonly struct InstructionParameter(int value, byte size)
     {VMOpCode.Areturn,         []},
     {VMOpCode.Return,          []},
 
-    {VMOpCode.Getstatic,       [2]},
-    {VMOpCode.Putstatic,       [2]},
-    {VMOpCode.Getfield,        [2]},
-    {VMOpCode.Putfield,        [2]},
-    {VMOpCode.Invokevirtual,   [2]},
-    {VMOpCode.Invokespecial,   [2]},
-    {VMOpCode.Invokestatic,    [2]},
+    {VMOpCode.Getstatic,       [(2, PreviewType.FieldRef)]},
+    {VMOpCode.Putstatic,       [(2, PreviewType.FieldRef)]},
+    {VMOpCode.Getfield,        [(2, PreviewType.FieldRef)]},
+    {VMOpCode.Putfield,        [(2, PreviewType.FieldRef)]},
+    {VMOpCode.Invokevirtual,   [(2, PreviewType.MethodRef)]},
+    {VMOpCode.Invokespecial,   [(2, PreviewType.MethodRef)]},
+    {VMOpCode.Invokestatic,    [(2, PreviewType.MethodRef)]},
 
-    {VMOpCode.Invokeinterface, [2, 1, 1]},
-    {VMOpCode.Invokedynamic,   [2, 2]},
+    {VMOpCode.Invokeinterface, [(2, PreviewType.MethodRef), 1, (1, PreviewType.Hidden)]},
+    {VMOpCode.Invokedynamic,   [(2, PreviewType.MethodRef), (2, PreviewType.Hidden)]},
 
-    {VMOpCode.New,             [2]},
-    {VMOpCode.Newarray,        [1]},
-    {VMOpCode.Anewarray,       [2]},
+    {VMOpCode.New,             [(2, PreviewType.Constant)]},
+    {VMOpCode.Newarray,        [1]}, // <- primitve type index, too lazy...
+    {VMOpCode.Anewarray,       [(2, PreviewType.Constant)]},
 
     {VMOpCode.Arraylength,     []},
     {VMOpCode.Athrow,          []},
 
-    {VMOpCode.Checkcast,       [2]},
-    {VMOpCode.Instanceof,      [2]},
+    {VMOpCode.Checkcast,       [(2, PreviewType.Constant)]},
+    {VMOpCode.Instanceof,      [(2, PreviewType.Constant)]},
 
     {VMOpCode.Monitorenter,    []},
     {VMOpCode.Monitorexit,     []},
 
     {VMOpCode.Wide,            null},
 
-    {VMOpCode.Multianewarray,  [2, 1]},
+    {VMOpCode.Multianewarray,  [(2, PreviewType.Constant), 1]},
 
-    {VMOpCode.Ifnull,          [2]},
-    {VMOpCode.Ifnonnull,       [2]},
+    {VMOpCode.Ifnull,          [(2, PreviewType.JumpIndex)]},
+    {VMOpCode.Ifnonnull,       [(2, PreviewType.JumpIndex)]},
 
-    {VMOpCode.GotoW,           [4]},
-    {VMOpCode.JsrW,            [4]},
+    {VMOpCode.GotoW,           [(4, PreviewType.JumpIndex)]},
+    {VMOpCode.JsrW,            [(4, PreviewType.JumpIndex)]},
   };
+
+  public string ToString(PreviewType type, JContextView context = default)
+  {
+    if (type == PreviewType.Hidden)
+    {
+      return "";
+    }
+
+    switch (type)
+    {
+      case PreviewType.Constant:
+      case PreviewType.FieldRef:
+      case PreviewType.MethodRef:
+      if (context.Constants.Length >= Value)
+      {
+        return context.Constants[Value - 1].ToString();
+      }
+      else
+      {
+        return ToString(PreviewType.Basic);
+      }
+      
+      case PreviewType.Local:
+        return $"Locals[{Value}]";
+      default:
+        return Value.ToString();
+    }
+  }
 
   public static (IEnumerable<InstructionParameter>, int) Parse(
     VMOpCode op_code, byte[] bytecode, int index)
   {
-    byte[] size_map = sParametersSizeMap[op_code];
+    ParameterPreview[] size_map = sParametersPreviews[op_code];
     int alignment = OpCodeDataAlignment(op_code);
     int padding = alignment == 0 ? 0 : (alignment - (index % alignment)) % alignment;
     index += padding;
@@ -468,7 +523,7 @@ public readonly struct InstructionParameter(int value, byte size)
 
     return (
       ParseSimple(size_map, bytecode, index),
-      size_map.Aggregate(0, (a, b) => a + b) + padding
+      size_map.Aggregate(0, (a, b) => a + b.Size) + padding
     );
   }
 
@@ -583,18 +638,18 @@ public readonly struct InstructionParameter(int value, byte size)
   }
 
   private static IEnumerable<InstructionParameter> ParseSimple(
-    byte[] size_map, byte[] bytecode, int index)
+    ParameterPreview[] previews, byte[] bytecode, int index)
   {
-    foreach (byte size in size_map)
+    foreach (ParameterPreview preview in previews)
     {
-      yield return FromData(bytecode, index, size);
-      index += size;
+      yield return FromData(bytecode, index, preview.Size);
+      index += preview.Size;
     }
   }
 
 }
 
-public readonly struct Instruction(VMOpCode op_code, IEnumerable<InstructionParameter> parameters)
+readonly struct Instruction(VMOpCode op_code, IEnumerable<InstructionParameter> parameters)
 {
   public readonly VMOpCode OpCode = op_code;
   private readonly InstructionParameter[] Parameters = [.. parameters];
@@ -662,7 +717,7 @@ public readonly struct Instruction(VMOpCode op_code, IEnumerable<InstructionPara
     }
   }
 
-  public override string ToString()
+  public string ToString(JContextView context = default)
   {
     if (OpCode >= VMOpCode._Max)
     {
@@ -674,7 +729,27 @@ public readonly struct Instruction(VMOpCode op_code, IEnumerable<InstructionPara
       StringBuilder builder = new();
       builder.Append(OpCode.ToString());
       builder.Append(' ');
-      builder.Append(string.Join(", ", from p in Parameters select p.Value));
+
+      var param_info = InstructionParameter.sParametersPreviews[OpCode];
+
+      if (param_info is null)
+      {
+        param_info = [ ..from p in Parameters
+          select new InstructionParameter.ParameterPreview(
+            p.Size, InstructionParameter.PreviewType.Basic
+          )
+        ];
+      }
+
+      foreach ((int index, InstructionParameter p) in Parameters.Iterate())
+      {
+        if (index != 0)
+        {
+          builder.Append(", ");
+        }
+        builder.Append(p.ToString(param_info[index].Type, context));
+      }
+
       return builder.ToString();
     }
 
