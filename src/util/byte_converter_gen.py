@@ -17,7 +17,7 @@ static class ByteConverter {"""
 
 footer = '\n}'
 
-def gen_method(type_name: str, type_size: int, big_endian: bool):
+def gen_method(type_name: str, type_size: int, big_endian: bool, data_type: str = 'byte[]'):
   unsigned = type_name[0].lower() == 'u' or type_name == 'byte'
   is_default_form = unsigned if size == 1 else not unsigned
 
@@ -41,7 +41,7 @@ def gen_method(type_name: str, type_size: int, big_endian: bool):
     builder.write(f"{'_Big' if big_endian else '_Little'}")
   
   # args
-  builder.write('(byte[] data, int offset = 0)')
+  builder.write(f'({data_type} data, int offset = 0)')
   
   builder.write('{\n')
 
@@ -87,16 +87,20 @@ def indent_str(text: str):
 
 types = 'short', 'ushort', 'int', 'uint', 'long', 'ulong'
 
-print(header)
 
-for i, v in enumerate(types):
-  size = 1 << ((i // 2) + 1)
-  
-  print(indent_str(gen_method(v, size, True)))
-  print()
-  if size == 1:
-    continue
-  print(indent_str(gen_method(v, size, False)))
-  print()
+def do_gen_method(type_name: str, size: int, big: bool):
+  return indent_str(gen_method(type_name, size, big, data_type='byte[]')), indent_str(gen_method(type_name, size, big, data_type='ReadOnlySpan<byte>'))
 
-print(footer)
+if __name__ == '__main__':
+  print(header)
+  for i, v in enumerate(types):
+    size = 1 << ((i // 2) + 1)
+    
+    print(*do_gen_method(v, size, True), sep='\n')
+    print()
+    if size == 1:
+      continue
+    print(*do_gen_method(v, size, False), sep='\n')
+    print()
+
+  print(footer)
