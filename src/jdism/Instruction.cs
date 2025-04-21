@@ -2,9 +2,6 @@
 
 using Colussom;
 using System.Diagnostics;
-using System.Diagnostics.Metrics;
-using System.Numerics;
-using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace JDism;
@@ -670,12 +667,12 @@ readonly struct Instruction(VMOpCode op_code, IEnumerable<InstructionParameter> 
     return (VMOpCode)byte_type;
   }
 
-  public static VMOpCode ReadOpCode(ByteReader reader)
+  public static VMOpCode ReadOpCode(ByteSource reader)
   {
     return ReadOpCode(reader.ReadByte());
   }
 
-  public static Instruction Read(ByteReader reader)
+  public static Instruction Read(ByteSource reader)
   {
     var result = Read(reader.Bytes, reader.Position, out int read_length);
     _ = reader.Read(read_length);

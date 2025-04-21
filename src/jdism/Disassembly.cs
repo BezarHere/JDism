@@ -1,7 +1,6 @@
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
-using Colussom;
+using JDism.Attributes;
 
 namespace JDism;
 
@@ -18,12 +17,12 @@ class Disassembly : InnerLogger
 
   public JContext Context;
 
-  // constant index X (X for the class file) is Constant[ConstantIndexRoutingTable[X]]
-  public ushort[] ConstantIndexRoutingTable = [];
-
   public Disassembly()
   {
-    Context = new JContext();
+    Context = new JContext
+    {
+      Logger = this
+    };
   }
 
   public string GenerateSource()
@@ -62,25 +61,6 @@ class Disassembly : InnerLogger
     builder.Append('}');
 
     return builder.ToString();
-  }
-
-  public void BuildCIRT()
-  {
-    if (Context.Constants is null)
-    {
-      return;
-    }
-
-    ConstantIndexRoutingTable = new ushort[Context.Constants.Length + 1];
-    int offset = 1;
-    for (int i = 0; i < ConstantIndexRoutingTable.Length; i++)
-    {
-      ConstantIndexRoutingTable[i] = (ushort)(i + offset);
-      //if (Constants[i].type == ConstantType.Double || Constants[i].type == ConstantType.Long)
-      //{
-      //	offset++;
-      //}
-    }
   }
 
   public ConstantError[] ValidateConstantTable()
@@ -296,74 +276,7 @@ class Disassembly : InnerLogger
       if (constant.type == ConstantType.Long || constant.type == ConstantType.Double)
         i++;
 
-      switch (constant.type)
-      {
-        case ConstantType.Integer:
-          {
-            constant.String = constant.IntegerValue.ToString();
-            break;
-          }
-        case ConstantType.Float:
-          {
-            constant.String = constant.FloatValue.ToString();
-            break;
-          }
-        case ConstantType.Long:
-          {
-            constant.String = constant.LongValue.ToString();
-            break;
-          }
-        case ConstantType.Double:
-          {
-            constant.String = constant.DoubleValue.ToString();
-            break;
-          }
-        case ConstantType.Class:
-          {
-            constant.String = Context.Constants[constant.NameIndex - 1].String.Replace('$', '.');
-            Logger.WriteLine($"TYPE: \"{constant.String}\"");
-            break;
-          }
-        case ConstantType.FieldReference:
-        case ConstantType.MethodReference:
-        case ConstantType.InterfaceMethodReference:
-          {
-            string class_name = Context.Constants[constant.ClassIndex - 1].String;
-            string name_type_name = Context.Constants[constant.NameTypeIndex - 1].String;
-            constant.String = $"{class_name}:{name_type_name}";
-            Logger.WriteLine($"REF: \"{constant.String}\"");
-            break;
-          }
-        case ConstantType.StringReference:
-          {
-            constant.String = $"&\"{Context.Constants[constant.NameIndex - 1].String}\"";
-            Logger.WriteLine($"CONSTANT STRING: \"{constant.String}\"");
-            break;
-          }
-        case ConstantType.NameTypeDescriptor:
-          {
-            SourceBuilder builder = new(
-              [],
-              Context.Constants[constant.NameIndex - 1].String,
-              new JType(Context.Constants[constant.DescriptorIndex - 1].String),
-              Context
-            );
-
-            if (builder.Type?.Kind == JTypeKind.Method)
-            {
-              constant.String = builder.BuildMethod(MethodAccessFlags.None);
-            }
-            else
-            {
-              constant.String = builder.BuildField(FieldAccessFlags.None);
-            }
-
-            Logger.WriteLine($"NAME-TYPE DESC: \"{constant.String}\"");
-            break;
-          }
-
-        default: break;
-      }
+      Constant.SetupRepresentation(constant, Context);
     }
   }
 
@@ -384,7 +297,7 @@ class Disassembly : InnerLogger
     for (uint i = 0; i < count; i++)
     {
       Logger.Write($"READING CONST[{i + 1}] ");
-      Constant constant = reader.ReadConstant();
+      Constant constant = Constant.Read(reader, Context);
       constants[i] = constant;
       if (constant.type == ConstantType.Double || constant.type == ConstantType.Long)
       {
@@ -497,6 +410,43 @@ class Disassembly : InnerLogger
       return new StackMapTableJAttribute(frames);
     }
 
+    if (info.AttributeType == JAttributeType.Exceptions)
+    {
+      ushort exceptions_count = ByteConverter.ToUshort_Big(data);
+      var exceptions = new ExceptionJAttribute.ExceptionNameInfo[exceptions_count];
+      for (int i = 0; i < exceptions_count; i++)
+      {
+        ushort index = ByteConverter.ToUshort_Big(data, i * 2 + 2);
+        index -= 1;
+
+        exceptions[i] = new(Context.Constants[index].String, index);
+      }
+      return new ExceptionJAttribute(exceptions);
+    }
+
+    if (info.AttributeType == JAttributeType.BootstrapMethods)
+    {
+      int index = 0;
+      ushort methods_count = ByteConverter.ToUshort_Big(data, index);
+      index += 2;
+
+      var methods = new BootstrapMethod[methods_count];
+      for (int i = 0; i < methods_count; i++)
+      {
+        ushort ref_index = ByteConverter.ToUshort_Big(data, index);
+        index += 2;
+        ref_index -= 1;
+        
+        Debug.Assert(Context.Constants[ref_index].type == ConstantType.MethodHandle);
+
+        ushort args_count = ByteConverter.ToUshort_Big(data, index);
+        index += 2;
+
+
+
+      }
+    }
+
     if (info.AttributeType == JAttributeType.UserDefined)
     {
       return new CustomJAttribute(data);
@@ -549,7 +499,7 @@ class Disassembly : InnerLogger
     );
   }
 
-  private IEnumerable<ExceptionRecord> ReadExceptionRecords(byte[] data, int count)
+  private static IEnumerable<ExceptionRecord> ReadExceptionRecords(byte[] data, int count)
   {
     for (int i = 0; i < count; i++)
     {

@@ -49,7 +49,6 @@ static class JDisassembler
 
 		
 
-		disassembly.BuildCIRT();
 
 #if DEBUG
 		ConstantError[] errors = disassembly.ValidateConstantTable();
