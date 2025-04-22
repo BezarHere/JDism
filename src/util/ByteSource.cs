@@ -1,16 +1,15 @@
 
-
-ref struct ByteSource
+class ByteSource
 {
-  public readonly ReadOnlySpan<byte> Content { get; init; }
-  public readonly Endianness Endianness { get; init; } = Endianness.Big;
+  public ArraySegment<byte> Content { get; init; }
+  public Endianness Endianness { get; init; } = Endianness.Big;
   public int Position { get; private set; } = 0;
 
-  public readonly bool Good => Position >= 0 && Position < Content.Length;
+  public bool Good => Position >= 0 && Position < Content.Count;
+  public bool Depleted => Position >= Content.Count;
 
-  public readonly bool Depleted => Position >= Content.Length;
-
-  public readonly byte this[int index] {
+  public byte this[int index]
+  {
     get => Content[Position + index];
   }
 
@@ -20,6 +19,12 @@ ref struct ByteSource
   }
 
   public ByteSource(ReadOnlySpan<byte> source, Endianness endianness = Endianness.Big)
+  {
+    Content = source.ToArray();
+    Endianness = endianness;
+  }
+
+  public ByteSource(byte[] source, Endianness endianness = Endianness.Big)
   {
     Content = source;
     Endianness = endianness;
@@ -36,7 +41,7 @@ ref struct ByteSource
         Position += pos;
         return;
       case SeekOrigin.End:
-        Position = Content.Length - pos;
+        Position = Content.Count - pos;
         return;
     }
   }
@@ -45,16 +50,16 @@ ref struct ByteSource
   {
     Position = Translate(index);
   }
-  
-  public readonly ByteSource Slice(Range range)
+
+  public ByteSource Slice(Range range)
   {
     (int start, int end) = Translate(range);
     return Slice(start, end - start);
   }
 
-  public readonly ByteSource Slice(int start, int length)
+  public ByteSource Slice(int start, int length)
   {
-    return new (Content.Slice(start, length), Endianness);
+    return new(Content.Slice(start, length), Endianness);
   }
 
   public ReadOnlySpan<byte> Get(int length)
@@ -122,12 +127,12 @@ ref struct ByteSource
   }
 
 
-  private readonly int Translate(Index index)
+  private int Translate(Index index)
   {
-    return index.IsFromEnd ? Content.Length - index.Value : index.Value;
+    return index.IsFromEnd ? Content.Count - index.Value : index.Value;
   }
 
-  private readonly (int, int) Translate(Range range)
+  private (int, int) Translate(Range range)
   {
     return (Translate(range.Start), Translate(range.End));
   }

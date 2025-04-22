@@ -17,6 +17,5 @@ class Member<AccessFlagsT> where AccessFlagsT : Enum
   {
     SourceBuilder source_builder = new(Attributes, Name, InnerType, context);
     return BuildSource(source_builder);
-
   }
 }

@@ -250,7 +250,7 @@ class Disassembly : InnerLogger
 
     }
 
-    return errors.ToArray();
+    return [.. errors];
   }
 
   public void PostProcess()
@@ -310,16 +310,22 @@ class Disassembly : InnerLogger
 
   private void SetupField(Field field)
   {
+
     // TODO: check for errors/out of range indices
     field.Name = Context.Constants[field.NameIndex - 1].String;
+    Logger.WriteLine($"settings up field {field.Name}");
+    
     JStringReader reader = new(Context.Constants[field.DescriptorIndex - 1].String);
     field.InnerType = new JType(reader);
   }
 
   private void SetupMethod(Method method)
   {
+
     // TODO: check for errors/out of range indices
     method.Name = Context.Constants[method.NameIndex - 1].String;
+    Logger.WriteLine($"settings up method {method.Name}");
+
     JStringReader reader = new(Context.Constants[method.DescriptorIndex - 1].String);
     method.InnerType = new JType(reader);
   }
@@ -333,6 +339,9 @@ class Disassembly : InnerLogger
 
 
     int data_len = ByteConverter.ToInt_Big(data, 2);
+
+    
+    Logger.WriteLine($"Read attribute header (name_idx={name_index}, data_ln={data_len})");
     return (name_index, data_len);
   }
 
@@ -343,15 +352,11 @@ class Disassembly : InnerLogger
     return LoadAttribute(name_index, reader.ReadBuffer(data_len), context);
   }
 
-  public JAttribute ParseAttribute(byte[] data, ref int index)
+  public JAttribute ParseAttribute(ByteSource source)
   {
-    (int name_index, int data_len) = ReadAttributeHeader(data[index..(index + 6)]);
-    index += 6;
+    (int name_index, int data_len) = ReadAttributeHeader(source.Get(6).ToArray());
 
-    Debug.Assert(data.Length - index >= data_len);
-    var attr_data = data[index..(index + data_len)];
-    index += data_len;
-    return LoadAttribute(name_index, attr_data);
+    return LoadAttribute(name_index, [.. source.Get(data_len)]);
   }
 
   private JAttribute LoadAttribute(int name_index, byte[] data,
@@ -362,11 +367,11 @@ class Disassembly : InnerLogger
     string name = Context.Constants[name_index].String;
     var attr_info = JAttribute.FetchAttributeTypeInfo(name);
 
-    return LoadAttribute(attr_info, data, context);
+    return LoadAttribute(attr_info, new(data, Endianness.Big), context);
   }
 
 
-  public JAttribute LoadAttribute(JAttribute.JAttributeTypeInfo info, byte[] data,
+  public JAttribute LoadAttribute(JAttribute.JAttributeTypeInfo info, ByteSource source,
               JTypeParseContext context = JTypeParseContext.Basic)
   {
     if (info is null)
@@ -376,13 +381,13 @@ class Disassembly : InnerLogger
 
     if (info.AttributeType == JAttributeType.ConstantValue)
     {
-      int const_index = ByteConverter.ToUshort_Big(data, 0);
+      int const_index = source.GetUShort();
       return new ConstantInfoJAttribute(Context.Constants[const_index - 1], (ushort)const_index);
     }
 
     if (info.AttributeType == JAttributeType.Signature)
     {
-      int const_index = ByteConverter.ToUshort_Big(data, 0);
+      int const_index = source.GetUShort();
       return new SignatureJAttribute(
         new JType(Context.Constants[const_index - 1].String, context),
         (ushort)const_index
@@ -391,32 +396,31 @@ class Disassembly : InnerLogger
 
     if (info.AttributeType == JAttributeType.Code)
     {
-      return LoadCodeAttribute(data);
+      return LoadCodeAttribute(source);
     }
 
     if (info.AttributeType == JAttributeType.StackMapTable)
     {
-      ushort frames_count = ByteConverter.ToUshort_Big(data);
+      ushort frames_count = source.GetUShort();
       StackMapFrame[] frames = new StackMapFrame[frames_count];
 
-      int index = 2;
       for (int i = 0; i < frames_count; i++)
       {
-        frames[i] = StackMapFrame.Parse(data, ref index);
+        frames[i] = StackMapFrame.Parse(source);
       }
 
-      Debug.Assert(index == data.Length);
+      Debug.Assert(source.Depleted);
 
       return new StackMapTableJAttribute(frames);
     }
 
     if (info.AttributeType == JAttributeType.Exceptions)
     {
-      ushort exceptions_count = ByteConverter.ToUshort_Big(data);
+      ushort exceptions_count = source.GetUShort();
       var exceptions = new ExceptionJAttribute.ExceptionNameInfo[exceptions_count];
       for (int i = 0; i < exceptions_count; i++)
       {
-        ushort index = ByteConverter.ToUshort_Big(data, i * 2 + 2);
+        ushort index = source.GetUShort();
         index -= 1;
 
         exceptions[i] = new(Context.Constants[index].String, index);
@@ -426,89 +430,84 @@ class Disassembly : InnerLogger
 
     if (info.AttributeType == JAttributeType.BootstrapMethods)
     {
-      int index = 0;
-      ushort methods_count = ByteConverter.ToUshort_Big(data, index);
-      index += 2;
+      ushort methods_count = source.GetUShort();
 
       var methods = new BootstrapMethod[methods_count];
       for (int i = 0; i < methods_count; i++)
       {
-        ushort ref_index = ByteConverter.ToUshort_Big(data, index);
-        index += 2;
+        ushort ref_index = source.GetUShort();
         ref_index -= 1;
-        
+
         Debug.Assert(Context.Constants[ref_index].type == ConstantType.MethodHandle);
 
-        ushort args_count = ByteConverter.ToUshort_Big(data, index);
-        index += 2;
+        ushort args_count = source.GetUShort();
 
+        var args =
+          from _ in Enumerable.Repeat(0, args_count)
+          let index = source.GetUShort()
+          select Context.Constants[index];
 
-
+        methods[i] = new(
+          new BootstrapMethodRef(Context.Constants[ref_index].String, ref_index),
+          [.. args]
+        );
       }
+
+      return new BootstrapMethodsJAttribute(methods);
     }
 
     if (info.AttributeType == JAttributeType.UserDefined)
     {
-      return new CustomJAttribute(data);
+      return new CustomJAttribute(source.Content.ToArray());
     }
 
     if (info.InstanceType == typeof(UnknownJAttribute))
     {
-      return new UnknownJAttribute(info.AttributeType, data);
+      return new UnknownJAttribute(info.AttributeType, source.Content.ToArray());
     }
 
     return null;
   }
 
-  private CodeInfoJAttribute LoadCodeAttribute(byte[] data)
+  private CodeInfoJAttribute LoadCodeAttribute(ByteSource data)
   {
-    int index = 0;
+    ushort max_stack = data.GetUShort();
+    ushort max_locals = data.GetUShort();
+    int code_length = data.GetInt();
 
-    ushort max_stack = ByteConverter.ToUshort_Big(data, index);
-    index += 2;
-    ushort max_locals = ByteConverter.ToUshort_Big(data, index);
-    index += 2;
-    int code_length = ByteConverter.ToInt_Big(data, index);
-    index += 4;
+    ByteSource code = new(data.Get(code_length), data.Endianness);
 
-    byte[] code = data[index..(code_length + index)];
-    index += code_length;
+    ushort exception_table_length = data.GetUShort();
 
-    ushort exception_table_length = ByteConverter.ToUshort_Big(data, index);
-    index += 2;
+    ExceptionRecord[] exceptions = [
+      ..ReadExceptionRecords(data, exception_table_length)
+    ];
 
-    var exceptions = ReadExceptionRecords(data[index..], exception_table_length);
-    index += exception_table_length * 8;
-
-    ushort attr_count = ByteConverter.ToUshort_Big(data, index);
-    index += 2;
-
+    ushort attr_count = data.GetUShort();
     JAttribute[] attributes = new JAttribute[attr_count];
 
     for (int i = 0; i < attr_count; i++)
     {
-      attributes[i] = ParseAttribute(data, ref index);
+      attributes[i] = ParseAttribute(data);
     }
 
-    Debug.Assert(index == data.Length);
     return new CodeInfoJAttribute(
       max_stack, max_locals,
       [.. Instruction.ReadAll(code)],
-      [.. exceptions],
+      exceptions,
       attributes
     );
   }
 
-  private static IEnumerable<ExceptionRecord> ReadExceptionRecords(byte[] data, int count)
+  private static IEnumerable<ExceptionRecord> ReadExceptionRecords(ByteSource source, int count)
   {
     for (int i = 0; i < count; i++)
     {
-      int cur = i * 8;
       yield return new ExceptionRecord(
-        ByteConverter.ToUshort_Big(data, cur + 0),
-        ByteConverter.ToUshort_Big(data, cur + 2),
-        ByteConverter.ToUshort_Big(data, cur + 4),
-        ByteConverter.ToUshort_Big(data, cur + 6)
+        source.GetUShort(),
+        source.GetUShort(),
+        source.GetUShort(),
+        source.GetUShort()
       );
     }
   }

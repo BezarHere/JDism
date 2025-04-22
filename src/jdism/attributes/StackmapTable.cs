@@ -2,40 +2,36 @@ using Util;
 
 namespace JDism.Attributes;
 
-public record VerificationTypeRecord(byte Tag, ushort Value)
+record VerificationTypeRecord(byte Tag, ushort Value)
 {
 
   public int ReadLength => DoTagRequireValue(Tag) ? 3 : 1;
 
   public static bool DoTagRequireValue(byte tag) => tag == 7 || tag == 8;
 
-  public static VerificationTypeRecord Parse(byte[] data, int index)
+  public static VerificationTypeRecord Parse(ByteSource source)
   {
-    byte tag = data[index];
-    index++;
+    byte tag = source.GetByte();
 
     ushort value = 0;
     if (DoTagRequireValue(tag))
     {
-      value = ByteConverter.ToUshort_Big(data, index);
-      index += 2;
+      value = source.GetUShort();
     }
 
     return new(tag, value);
   }
 
-  public static IEnumerable<VerificationTypeRecord> ParseAll(byte[] data, int index, int count)
+  public static IEnumerable<VerificationTypeRecord> ParseAll(ByteSource source, int count)
   {
     for (int i = 0; i < count; i++)
     {
-      var result = Parse(data, index);
-      yield return result;
-      index += result.ReadLength;
+      yield return Parse(source);
     }
   }
 }
 
-public readonly struct StackMapFrame(byte tag, ushort offset_delta,
+readonly struct StackMapFrame(byte tag, ushort offset_delta,
                             IEnumerable<VerificationTypeRecord> locals,
                             IEnumerable<VerificationTypeRecord> stack)
 {
@@ -44,11 +40,9 @@ public readonly struct StackMapFrame(byte tag, ushort offset_delta,
   public readonly VerificationTypeRecord[] Locals = [.. locals];
   public readonly VerificationTypeRecord[] Stack = [.. stack];
 
-  public static StackMapFrame Parse(byte[] data, ref int index)
+  public static StackMapFrame Parse(ByteSource source)
   {
-    byte tag = data[index];
-    index++;
-
+    byte tag = source.GetByte();
 
     foreach (var specifier in sSpecifiers)
     {
@@ -60,12 +54,11 @@ public readonly struct StackMapFrame(byte tag, ushort offset_delta,
       ushort offset_delta = 0;
       if (specifier.HasOffsetDelta)
       {
-        offset_delta = ByteConverter.ToUshort_Big(data, index);
-        index += 2;
+        offset_delta = source.GetUShort();
       }
 
-      var locals = ParseVTRs(data, ref index, specifier.LocalsCount);
-      var stack = ParseVTRs(data, ref index, specifier.StackCount);
+      var locals = ParseVTRs(source, specifier.LocalsCount);
+      var stack = ParseVTRs(source, specifier.StackCount);
       return new(
         tag, offset_delta,
         locals,
@@ -76,19 +69,16 @@ public readonly struct StackMapFrame(byte tag, ushort offset_delta,
     return default;
   }
 
-  private static VerificationTypeRecord[] ParseVTRs(byte[] data, ref int index, int count)
+  private static VerificationTypeRecord[] ParseVTRs(ByteSource source, int count)
   {
     if (count == -1)
     {
-      count = ByteConverter.ToUshort_Big(data, index);
-      index += 2;
+      count = source.GetUShort();
     }
 
     var locals = VerificationTypeRecord.ParseAll(
-      data, index, count
+       source, count
     ).ToArray();
-
-    index += locals.Aggregate(0, (acc, vtr) => acc + vtr.ReadLength);
     return locals;
   }
 
@@ -114,7 +104,7 @@ public readonly struct StackMapFrame(byte tag, ushort offset_delta,
 }
 
 [Register(JAttributeType.StackMapTable)]
-public class StackMapTableJAttribute(IEnumerable<StackMapFrame> frames) : JAttribute
+class StackMapTableJAttribute(IEnumerable<StackMapFrame> frames) : JAttribute
 {
   public StackMapFrame[] Frames = [.. frames];
 }

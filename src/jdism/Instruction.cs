@@ -1,7 +1,7 @@
 ﻿
 
-using Colussom;
 using System.Diagnostics;
+using System.Net.Http.Headers;
 using System.Text;
 
 namespace JDism;
@@ -484,15 +484,16 @@ readonly struct InstructionParameter(int value, byte size)
       case PreviewType.Constant:
       case PreviewType.FieldRef:
       case PreviewType.MethodRef:
-      if (context.Constants.Length >= Value)
-      {
-        return context.Constants[Value - 1].ToString();
-      }
-      else
-      {
-        return ToString(PreviewType.Basic);
-      }
-      
+        if (context.Constants.Length >= Value)
+        {
+          return context.Constants[Value - 1].ToString();
+        }
+        else
+        {
+          return ToString(PreviewType.Basic);
+        }
+      case PreviewType.JumpIndex:
+        return Value.ToString(Instruction.AddressFormat);
       case PreviewType.Local:
         return $"Locals[{Value}]";
       default:
@@ -500,40 +501,34 @@ readonly struct InstructionParameter(int value, byte size)
     }
   }
 
-  public static (IEnumerable<InstructionParameter>, int) Parse(
-    VMOpCode op_code, byte[] bytecode, int index)
+  public static IEnumerable<InstructionParameter> Parse(
+    VMOpCode op_code, ByteSource source)
   {
     ParameterPreview[] size_map = sParametersPreviews[op_code];
     int alignment = OpCodeDataAlignment(op_code);
-    int padding = alignment == 0 ? 0 : (alignment - (index % alignment)) % alignment;
-    index += padding;
+    int padding = alignment == 0 ? 0 : (alignment - (source.Position % alignment)) % alignment;
+    source.Seek(padding, SeekOrigin.Current);
 
     if (size_map is null)
     {
-      InstructionParameter[] result = [.. ParseDynamic(op_code, bytecode, index)];
-
-      return (
-        result,
-        result.Aggregate(0, (acc, i) => acc + i.Size) + padding
-      );
+      return ParseDynamic(op_code, source);
     }
 
-    return (
-      ParseSimple(size_map, bytecode, index),
-      size_map.Aggregate(0, (a, b) => a + b.Size) + padding
-    );
+    return ParseSimple(size_map, source);
   }
 
-  public static InstructionParameter FromData(byte[] data, int index, byte size)
+  public static InstructionParameter ParseOne(ByteSource source, byte size)
   {
-    // big endian
-
-    int value = 0;
-    for (int i = 0; i < size; i++)
+    switch (size)
     {
-      value |= data[i + index] << ((size - i - 1) * 8);
+      case 1:
+        return new(source.GetByte(), size);
+      case 2:
+        return new(source.GetShort(), size);
+      case 4:
+        return new(source.GetInt(), size);
+      default: throw new ArgumentException("size should be 1, 2 or 4", nameof(size));
     }
-    return new(value, size);
   }
 
   private static int OpCodeDataAlignment(VMOpCode op_code)
@@ -546,40 +541,37 @@ readonly struct InstructionParameter(int value, byte size)
   }
 
   private static IEnumerable<InstructionParameter> ParseDynamic(
-    VMOpCode op_code, byte[] bytecode, int index)
+    VMOpCode op_code, ByteSource source)
   {
     if (op_code == VMOpCode.Tableswitch)
     {
-      return ParseDynamic_TableSwitch(bytecode, index);
+      return ParseDynamic_TableSwitch(source);
     }
 
     if (op_code == VMOpCode.Lookupswitch)
     {
-      return ParseDynamic_LookupSwitch(bytecode, index);
+      return ParseDynamic_LookupSwitch(source);
     }
 
     if (op_code == VMOpCode.Wide)
     {
-      return ParseDynamic_Wide(bytecode, index);
+      return ParseDynamic_Wide(source);
     }
 
     return null;
   }
 
   private static IEnumerable<InstructionParameter> ParseDynamic_TableSwitch(
-    byte[] bytecode, int index)
+    ByteSource source)
   {
     // default byte
-    yield return FromData(bytecode, index, 4);
-    index += 4;
+    yield return ParseOne(source, 4);
 
-    InstructionParameter low = FromData(bytecode, index, 4);
+    InstructionParameter low = ParseOne(source, 4);
     yield return low;
-    index += 4;
 
-    InstructionParameter high = FromData(bytecode, index, 4);
+    InstructionParameter high = ParseOne(source, 4);
     yield return high;
-    index += 4;
 
     Debug.Assert(low.Value <= high.Value);
 
@@ -587,69 +579,65 @@ readonly struct InstructionParameter(int value, byte size)
 
     for (int i = 0; i < entries_count; i++)
     {
-      yield return FromData(bytecode, index, 4);
-      index += 4;
+      yield return ParseOne(source, 4);
     }
   }
 
   private static IEnumerable<InstructionParameter> ParseDynamic_LookupSwitch(
-    byte[] bytecode, int index)
+    ByteSource source)
   {
     // default byte
-    yield return FromData(bytecode, index, 4);
-    index += 4;
+    yield return ParseOne(source, 4);
 
-    InstructionParameter npairs_count = FromData(bytecode, index, 4);
+    InstructionParameter npairs_count = ParseOne(source, 4);
     yield return npairs_count;
-    index += 4;
 
     Debug.Assert(npairs_count.Value > 0);
 
 
     for (int i = 0; i < npairs_count.Value; i++)
     {
-      yield return FromData(bytecode, index, 4); // match
-      yield return FromData(bytecode, index + 4, 4); // offset
-      index += 8;
+      yield return ParseOne(source, 4); // match
+      yield return ParseOne(source, 4); // offset
     }
   }
 
   private static IEnumerable<InstructionParameter> ParseDynamic_Wide(
-    byte[] bytecode, int index)
+    ByteSource source)
   {
-    InstructionParameter op_code_param = FromData(bytecode, index, 1);
+    InstructionParameter op_code_param = ParseOne(source, 1);
     yield return op_code_param;
-    index++;
 
     VMOpCode op_code = Instruction.ReadOpCode((byte)op_code_param.Value);
     Debug.Assert(op_code != VMOpCode._Invalid);
 
-    yield return FromData(bytecode, index, 2);
-    index += 2;
+    yield return ParseOne(source, 2);
 
     if (op_code == VMOpCode.Iinc)
     {
-      yield return FromData(bytecode, index, 2);
-      index += 2;
+      yield return ParseOne(source, 2);
     }
   }
 
   private static IEnumerable<InstructionParameter> ParseSimple(
-    ParameterPreview[] previews, byte[] bytecode, int index)
+    ParameterPreview[] previews, ByteSource source)
   {
     foreach (ParameterPreview preview in previews)
     {
-      yield return FromData(bytecode, index, preview.Size);
-      index += preview.Size;
+      yield return ParseOne(source, preview.Size);
     }
   }
 
 }
 
-readonly struct Instruction(VMOpCode op_code, IEnumerable<InstructionParameter> parameters)
+readonly struct Instruction(VMOpCode op_code, IEnumerable<InstructionParameter> parameters,
+                            int address = 0)
 {
+  public const string AddressFormat = "X4";
+
   public readonly VMOpCode OpCode = op_code;
-  private readonly InstructionParameter[] Parameters = [.. parameters];
+  public readonly InstructionParameter[] Parameters = [.. parameters];
+  public readonly int Address = address;
 
   public Instruction()
     : this(VMOpCode._Invalid, [])
@@ -669,48 +657,31 @@ readonly struct Instruction(VMOpCode op_code, IEnumerable<InstructionParameter> 
 
   public static VMOpCode ReadOpCode(ByteSource reader)
   {
-    return ReadOpCode(reader.ReadByte());
+    return ReadOpCode(reader.GetByte());
   }
 
-  public static Instruction Read(ByteSource reader)
+  public static Instruction Read(ByteSource source)
   {
-    var result = Read(reader.Bytes, reader.Position, out int read_length);
-    _ = reader.Read(read_length);
-    return result;
-  }
-
-  public static Instruction Read(byte[] data, int index, out int read_length)
-  {
-    VMOpCode type = ReadOpCode(data[index]);
-    index++;
+    int address = source.Position;
+    VMOpCode type = ReadOpCode(source.GetByte());
 
     if (type == VMOpCode._Invalid)
     {
-      read_length = 1;
       return new();
     }
 
-    var (parameters, data_read_length) = InstructionParameter.Parse(
-      type,
-      data,
-      index
+    var parameters = InstructionParameter.Parse(
+      type, source
     );
 
-    read_length = data_read_length + 1;
-
-    return new Instruction(type, parameters);
+    return new Instruction(type, parameters, address);
   }
 
-  public static IEnumerable<Instruction> ReadAll(byte[] data)
+  public static IEnumerable<Instruction> ReadAll(ByteSource source)
   {
-    int index = 0;
-    while (index < data.Length)
+    while (!source.Depleted)
     {
-      // error handling...
-      var inst = Read(data, index, out int read_length);
-      index += read_length;
-
-      yield return inst;
+      yield return Read(source);
     }
   }
 
@@ -721,10 +692,13 @@ readonly struct Instruction(VMOpCode op_code, IEnumerable<InstructionParameter> 
       return "????";
     }
 
+    StringBuilder builder = new();
+    builder.Append(Address.ToString(AddressFormat));
+    builder.Append(' ');
+    builder.Append(OpCode.ToString());
+    
     if (Parameters.Length > 0)
     {
-      StringBuilder builder = new();
-      builder.Append(OpCode.ToString());
       builder.Append(' ');
 
       var param_info = InstructionParameter.sParametersPreviews[OpCode];
@@ -747,10 +721,9 @@ readonly struct Instruction(VMOpCode op_code, IEnumerable<InstructionParameter> 
         builder.Append(p.ToString(param_info[index].Type, context));
       }
 
-      return builder.ToString();
     }
 
-    return OpCode.ToString();
+    return builder.ToString();
   }
 
 }
