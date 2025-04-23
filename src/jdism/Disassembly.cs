@@ -6,8 +6,6 @@ namespace JDism;
 
 class Disassembly : InnerLogger
 {
-  public ushort VersionMinor;
-  public ushort VersionMajor;
   public ClassAccessFlags AccessFlags;
   public ushort ThisClass;
   public ushort SuperClass;
@@ -80,170 +78,7 @@ class Disassembly : InnerLogger
         continue;
       }
 
-      switch (constant.type)
-      {
-        case ConstantType.Class:
-          {
-            if (!IsConstantOfType(constant.NameIndex, ConstantType.String))
-            {
-              errors.Add(new(i, $"Constant Index {constant.NameIndex} should be a valid index to a string constant"));
-            }
-            break;
-          }
-        case ConstantType.FieldReference:
-        case ConstantType.MethodReference:
-        case ConstantType.InterfaceMethodReference:
-          {
-            if (!IsConstantOfType(constant.ClassIndex, ConstantType.Class))
-            {
-              errors.Add(new(i, $"Constant Index {constant.ClassIndex} should be a valid index to a class constant"));
-            }
 
-            if (!IsConstantOfType(constant.NameTypeIndex, ConstantType.NameTypeDescriptor))
-            {
-              errors.Add(new(i, $"Constant Index {constant.NameTypeIndex} should be a valid index to a name type descriptor constant"));
-            }
-
-            break;
-          }
-        case ConstantType.StringReference:
-          {
-            if (!IsConstantOfType(constant.StringIndex, ConstantType.String))
-            {
-              errors.Add(new(i, $"Constant Index {constant.StringIndex} should be a valid index to a string constant"));
-            }
-
-            break;
-          }
-        case ConstantType.NameTypeDescriptor:
-          {
-            if (!IsConstantOfType(constant.NameIndex, ConstantType.String))
-            {
-              errors.Add(new(i, $"Constant Index {constant.NameIndex} should be a valid index to a string constant (name index)"));
-            }
-
-            if (!IsConstantOfType(constant.NameIndex, ConstantType.String))
-            {
-              errors.Add(new(i, $"Constant Index {constant.NameIndex} should be a valid index to a string constant (descriptor index)"));
-            }
-
-            break;
-          }
-        case ConstantType.MethodHandle:
-          {
-            switch (constant.ReferenceKind)
-            {
-              case MethodReferenceKind.GetField:
-              case MethodReferenceKind.GetStatic:
-              case MethodReferenceKind.PutField:
-              case MethodReferenceKind.PutStatic:
-                {
-                  if (!IsConstantOfType(constant.ReferenceIndex, ConstantType.FieldReference))
-                  {
-                    errors.Add(new(i, $"Constant Index {constant.ReferenceIndex} should be a valid index to a field reference constant"));
-                  }
-                  break;
-                }
-              case MethodReferenceKind.InvokeVirtual:
-              case MethodReferenceKind.NewInvokeSpecial:
-                {
-                  if (!IsConstantOfType(constant.ReferenceIndex, ConstantType.MethodReference))
-                  {
-                    errors.Add(new(i, $"Constant Index {constant.ReferenceIndex} should be a valid index to a method reference constant"));
-                  }
-                  else if (constant.ReferenceKind != MethodReferenceKind.NewInvokeSpecial)
-                  {
-                    // TODO: CHECK FOR VALID METHOD NAME
-                  }
-                  else
-                  {
-                    // TODO: CHECK FOR VALID NEW METHOD NAME
-                  }
-
-                  break;
-                }
-              case MethodReferenceKind.InvokeStatic:
-              case MethodReferenceKind.InvokeSpecial:
-                {
-                  bool ref_index_valid_55 = IsConstantOfType(constant.ReferenceIndex, ConstantType.MethodReference);
-                  if (VersionMajor >= 56)
-                  {
-                    if (!(ref_index_valid_55 || IsConstantOfType(constant.ReferenceIndex, ConstantType.InterfaceMethodReference)))
-                    {
-                      errors.Add(new(i, $"Constant Index {constant.ReferenceIndex} should be a valid index to a method reference or an interface method reference constant (v56)"));
-                    }
-                    else
-                    {
-                      // TODO: CHECK FOR VALID METHOD NAME
-                    }
-
-                    break;
-                  }
-
-                  if (!ref_index_valid_55)
-                  {
-                    errors.Add(new(i, $"Constant Index {constant.ReferenceIndex} should be a valid index to a method reference constant (pre v55)"));
-                  }
-                  else
-                  {
-                    // TODO: CHECK FOR VALID METHOD NAME
-                  }
-
-                  break;
-                }
-              case MethodReferenceKind.InvokeInterface:
-                {
-                  if (!IsConstantOfType(constant.ReferenceIndex, ConstantType.InterfaceMethodReference))
-                  {
-                    errors.Add(new(i, $"Constant Index {constant.ReferenceIndex} should be a valid index to an interface method reference constant"));
-                  }
-                  else
-                  {
-                    // TODO: CHECK FOR VALID METHOD NAME
-                  }
-
-                  break;
-                }
-            }
-
-            break;
-          }
-        case ConstantType.MethodType:
-          {
-            if (!IsConstantOfType(constant.DescriptorIndex, ConstantType.String))
-            {
-              errors.Add(new(i, $"Constant Index {constant.DescriptorIndex} should be a valid index to a string constant (method type)"));
-            }
-
-            break;
-          }
-        case ConstantType.InvokeDynamic:
-          {
-            // TODO: CHECK FOR THE BOOTSTRAP METHOD BETWEEN THE BOOTSTRAP METHODS OF THIS CLASS
-
-            if (!IsConstantOfType(constant.NameTypeIndex, ConstantType.NameTypeDescriptor))
-            {
-              errors.Add(new(i, $"Constant Index {constant.NameTypeIndex} should be a valid index to a name type descriptor constant (method type)"));
-            }
-
-            break;
-          }
-        case ConstantType.String:
-        case ConstantType.Integer:
-        case ConstantType.Long:
-        case ConstantType.Float:
-        case ConstantType.Double:
-          {
-            // might check for strings later
-            // nothing to do here
-            break;
-          }
-        default:
-          {
-            errors.Add(new(i, $"Invalid constant type {(int)constant.type}"));
-            break;
-          }
-      }
 
       if (constant.IsDoubleSlotted())
         i++;
@@ -279,16 +114,6 @@ class Disassembly : InnerLogger
       Constant.SetupRepresentation(constant, Context);
     }
   }
-
-  private bool IsConstantOfType(ushort index, ConstantType type)
-  {
-    // the class constant table indices start at 1
-    index--;
-    if (index >= Context.Constants.Length)
-      return false;
-    return Context.Constants[index].type == type;
-  }
-
   public void DeserializeConstantsTable(JReader reader)
   {
     int count = reader.ReadU16BE() - 1;
@@ -314,7 +139,7 @@ class Disassembly : InnerLogger
     // TODO: check for errors/out of range indices
     field.Name = Context.Constants[field.NameIndex - 1].String;
     Logger.WriteLine($"settings up field {field.Name}");
-    
+
     JStringReader reader = new(Context.Constants[field.DescriptorIndex - 1].String);
     field.InnerType = new JType(reader);
   }
@@ -340,7 +165,7 @@ class Disassembly : InnerLogger
 
     int data_len = ByteConverter.ToInt_Big(data, 2);
 
-    
+
     Logger.WriteLine($"Read attribute header (name_idx={name_index}, data_ln={data_len})");
     return (name_index, data_len);
   }
@@ -469,6 +294,21 @@ class Disassembly : InnerLogger
     return null;
   }
 
+  private bool IsConstantOfType(ushort index, ConstantType type)
+  {
+    return IsConstantOfType(index, type, Context);
+  }
+
+  private static bool IsConstantOfType(ushort index, ConstantType type, JContextView ctx)
+  {
+    // the class constant table indices start at 1
+    index--;
+    if (index >= ctx.Constants.Length)
+      return false;
+    return ctx.Constants[index].type == type;
+  }
+
+
   private CodeInfoJAttribute LoadCodeAttribute(ByteSource data)
   {
     ushort max_stack = data.GetUShort();
@@ -510,5 +350,175 @@ class Disassembly : InnerLogger
         source.GetUShort()
       );
     }
+  }
+
+  private static IList<string> CheckConstantErrors(Constant constant, JContextView ctx)
+  {
+    List<string> results = [];
+    switch (constant.type)
+    {
+      case ConstantType.Class:
+        {
+          if (!IsConstantOfType(constant.NameIndex, ConstantType.String, ctx))
+          {
+            results.Add($"Constant Index {constant.NameIndex} should be a valid index to a string constant");
+          }
+          break;
+        }
+      case ConstantType.FieldReference:
+      case ConstantType.MethodReference:
+      case ConstantType.InterfaceMethodReference:
+        {
+          if (!IsConstantOfType(constant.ClassIndex, ConstantType.Class, ctx))
+          {
+            results.Add($"Constant Index {constant.ClassIndex} should be a valid index to a class constant");
+          }
+
+          if (!IsConstantOfType(constant.NameTypeIndex, ConstantType.NameTypeDescriptor, ctx))
+          {
+            results.Add($"Constant Index {constant.NameTypeIndex} should be a valid index to a name type descriptor constant");
+          }
+
+          break;
+        }
+      case ConstantType.StringReference:
+        {
+          if (!IsConstantOfType(constant.StringIndex, ConstantType.String, ctx))
+          {
+            results.Add($"Constant Index {constant.StringIndex} should be a valid index to a string constant");
+          }
+
+          break;
+        }
+      case ConstantType.NameTypeDescriptor:
+        {
+          if (!IsConstantOfType(constant.NameIndex, ConstantType.String, ctx))
+          {
+            results.Add($"Constant Index {constant.NameIndex} should be a valid index to a string constant (name index)");
+          }
+
+          if (!IsConstantOfType(constant.NameIndex, ConstantType.String, ctx))
+          {
+            results.Add($"Constant Index {constant.NameIndex} should be a valid index to a string constant (descriptor index)");
+          }
+
+          break;
+        }
+      case ConstantType.MethodHandle:
+        {
+          switch (constant.ReferenceKind)
+          {
+            case MethodReferenceKind.GetField:
+            case MethodReferenceKind.GetStatic:
+            case MethodReferenceKind.PutField:
+            case MethodReferenceKind.PutStatic:
+              {
+                if (!IsConstantOfType(constant.ReferenceIndex, ConstantType.FieldReference, ctx))
+                {
+                  results.Add($"Constant Index {constant.ReferenceIndex} should be a valid index to a field reference constant");
+                }
+                break;
+              }
+            case MethodReferenceKind.InvokeVirtual:
+            case MethodReferenceKind.NewInvokeSpecial:
+              {
+                if (!IsConstantOfType(constant.ReferenceIndex, ConstantType.MethodReference, ctx))
+                {
+                  results.Add($"Constant Index {constant.ReferenceIndex} should be a valid index to a method reference constant");
+                }
+                else if (constant.ReferenceKind != MethodReferenceKind.NewInvokeSpecial)
+                {
+                  // TODO: CHECK FOR VALID METHOD NAME
+                }
+                else
+                {
+                  // TODO: CHECK FOR VALID NEW METHOD NAME
+                }
+
+                break;
+              }
+            case MethodReferenceKind.InvokeStatic:
+            case MethodReferenceKind.InvokeSpecial:
+              {
+                bool ref_index_valid_55 = IsConstantOfType(constant.ReferenceIndex, ConstantType.MethodReference, ctx);
+                if (ctx.Version.Major >= 56)
+                {
+                  if (!(ref_index_valid_55 || IsConstantOfType(constant.ReferenceIndex, ConstantType.InterfaceMethodReference, ctx)))
+                  {
+                    results.Add($"Constant Index {constant.ReferenceIndex} should be a valid index to a method reference or an interface method reference constant (v56)");
+                  }
+                  else
+                  {
+                    // TODO: CHECK FOR VALID METHOD NAME
+                  }
+
+                  break;
+                }
+
+                if (!ref_index_valid_55)
+                {
+                  results.Add($"Constant Index {constant.ReferenceIndex} should be a valid index to a method reference constant (pre v55)");
+                }
+                else
+                {
+                  // TODO: CHECK FOR VALID METHOD NAME
+                }
+
+                break;
+              }
+            case MethodReferenceKind.InvokeInterface:
+              {
+                if (!IsConstantOfType(constant.ReferenceIndex, ConstantType.InterfaceMethodReference, ctx))
+                {
+                  results.Add($"Constant Index {constant.ReferenceIndex} should be a valid index to an interface method reference constant");
+                }
+                else
+                {
+                  // TODO: CHECK FOR VALID METHOD NAME
+                }
+
+                break;
+              }
+          }
+
+          break;
+        }
+      case ConstantType.MethodType:
+        {
+          if (!IsConstantOfType(constant.DescriptorIndex, ConstantType.String, ctx))
+          {
+            results.Add($"Constant Index {constant.DescriptorIndex} should be a valid index to a string constant (method type)");
+          }
+
+          break;
+        }
+      case ConstantType.InvokeDynamic:
+        {
+          // TODO: CHECK FOR THE BOOTSTRAP METHOD BETWEEN THE BOOTSTRAP METHODS OF THIS CLASS
+
+          if (!IsConstantOfType(constant.NameTypeIndex, ConstantType.NameTypeDescriptor, ctx))
+          {
+            results.Add($"Constant Index {constant.NameTypeIndex} should be a valid index to a name type descriptor constant (method type)");
+          }
+
+          break;
+        }
+      case ConstantType.String:
+      case ConstantType.Integer:
+      case ConstantType.Long:
+      case ConstantType.Float:
+      case ConstantType.Double:
+        {
+          // might check for strings later
+          // nothing to do here
+          break;
+        }
+      default:
+        {
+          results.Add($"Invalid constant type {(int)constant.type}");
+          break;
+        }
+    }
+    return results;
   }
 }

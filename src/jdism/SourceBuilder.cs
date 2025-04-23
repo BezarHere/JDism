@@ -13,10 +13,10 @@ ref struct SourceBuilder(IEnumerable<JAttribute> attributes, string name, JType?
   public readonly JType? Type => type;
   public readonly JContextView Context = context;
 
-  public string BuildMethod(MethodAccessFlags access_flags)
+  public readonly string BuildMethod(MethodAccessFlags access_flags)
   {
     StringBuilder builder = new();
-    IEnumerable<Instruction> instructions = null;
+    ReadOnlySpan<Instruction> instructions = null;
     JType? _type = Type;
 
     foreach (JAttribute attribute in Attributes)
@@ -45,7 +45,7 @@ ref struct SourceBuilder(IEnumerable<JAttribute> attributes, string name, JType?
 
     builder.Append(type.ToString().Replace(JType.SpacialNamePlaceholder, Name));
 
-    if (instructions is null)
+    if (instructions.IsEmpty)
     {
       builder.Append(';');
       return builder.ToString();
@@ -54,28 +54,32 @@ ref struct SourceBuilder(IEnumerable<JAttribute> attributes, string name, JType?
     builder.AppendLine();
     builder.Append('{').AppendLine();
 
-    foreach (Instruction inst in instructions)
-    {
-      builder.Append(Indent);
-      builder.Append(inst.ToString(Context));
-      builder.AppendLine();
-    }
+    InstructionDisplay inst_display = new();
+    builder.Append(inst_display.Decode(instructions, Context));
 
     builder.Append('}');
 
     return builder.ToString();
   }
 
-  public string BuildField(FieldAccessFlags access_flags)
+  public readonly string BuildField(FieldAccessFlags access_flags)
   {
     StringBuilder builder = new();
     JType? _type = Type;
+
+    Constant default_value = null;
 
     foreach (JAttribute attribute in attributes)
     {
       if (attribute is SignatureJAttribute signature_attr)
       {
         _type = signature_attr.Signature;
+        continue;
+      }
+
+      if (attribute is ConstantInfoJAttribute constant_attr)
+      {
+        default_value = constant_attr.Constant;
         continue;
       }
 
@@ -94,6 +98,15 @@ ref struct SourceBuilder(IEnumerable<JAttribute> attributes, string name, JType?
     builder.Append(type.ToString());
     builder.Append(' ');
     builder.Append(name);
+    
+    if (default_value is not null)
+    {
+      builder.Append(' ');
+      builder.Append('=');
+      builder.Append(' ');
+      builder.Append(default_value.ToString());
+    }
+
     builder.Append(';');
 
     return builder.ToString();

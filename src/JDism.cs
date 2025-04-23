@@ -42,8 +42,10 @@ static class JDisassembler
 			return "invalid signature";
 		}
 
-		disassembly.VersionMinor = reader.ReadU16BE();
-		disassembly.VersionMajor = reader.ReadU16BE();
+		disassembly.Context.Version = (
+      reader.ReadU16BE(),
+      reader.ReadU16BE()
+    );
 
 		disassembly.DeserializeConstantsTable(reader);
 
