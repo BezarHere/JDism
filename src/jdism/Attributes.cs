@@ -3,8 +3,8 @@ using Util;
 namespace JDism;
 
 
-[Register(JAttributeType.ConstantValue)]
-public class ConstantInfoJAttribute(Constant constant, ushort index) : JAttribute
+[Register(AnnotationType.ConstantValue)]
+public class ConstantInfoAnnotation(Constant constant, ushort index) : JVMAttribute
 {
   public readonly Constant Constant = constant;
   public readonly ushort Index = index;
@@ -16,8 +16,8 @@ public class ConstantInfoJAttribute(Constant constant, ushort index) : JAttribut
   }
 }
 
-[Register(JAttributeType.Signature)]
-public class SignatureJAttribute(JType type, ushort index) : JAttribute
+[Register(AnnotationType.Signature)]
+public class SignatureAnnotation(JType type, ushort index) : JVMAttribute
 {
   public JType Signature = type;
   public ushort Index = index;
@@ -30,8 +30,8 @@ public class SignatureJAttribute(JType type, ushort index) : JAttribute
 
 public record ExceptionRecord(ushort StartPc, ushort EndPc, ushort HandlerPc, ushort CatchType);
 
-[Register(JAttributeType.Code)]
-class CodeInfoJAttribute : JAttribute
+[Register(AnnotationType.Code)]
+class CodeInfoAnnotation : JVMAttribute
 {
 
   public ushort MaxStack;
@@ -39,12 +39,12 @@ class CodeInfoJAttribute : JAttribute
   public Instruction[] Instructions;
 
   public ExceptionRecord[] ExceptionRecords;
-  public JAttribute[] Attributes;
+  public JVMAttribute[] Attributes;
 
-  public CodeInfoJAttribute(ushort max_stack, ushort max_locals,
+  public CodeInfoAnnotation(ushort max_stack, ushort max_locals,
                             Instruction[] instructions,
                             ExceptionRecord[] exceptions,
-                            JAttribute[] attributes)
+                            JVMAttribute[] attributes)
   {
     MaxStack = max_stack;
     MaxLocals = max_locals;
@@ -63,9 +63,9 @@ class CodeInfoJAttribute : JAttribute
 
 
 
-[Register(JAttributeType.Exceptions)]
-public class ExceptionJAttribute(IEnumerable<ExceptionJAttribute.ExceptionNameInfo> infos)
-  : JAttribute
+[Register(AnnotationType.Exceptions)]
+public class ExceptionAnnotation(IEnumerable<ExceptionAnnotation.ExceptionNameInfo> infos)
+  : JVMAttribute
 {
   public record struct ExceptionNameInfo(string Name, ushort Index);
   public ExceptionNameInfo[] ExceptionNames = [.. infos];
@@ -76,9 +76,9 @@ public class ExceptionJAttribute(IEnumerable<ExceptionJAttribute.ExceptionNameIn
   }
 }
 
-public class UnknownJAttribute(JAttributeType type, byte[] data) : JAttribute
+public class UnknownAnnotation(AnnotationType type, byte[] data) : JVMAttribute
 {
-  public JAttributeType Type => type;
+  public AnnotationType Type => type;
   public byte[] Data => data;
 
   public override string ToString()
@@ -88,7 +88,7 @@ public class UnknownJAttribute(JAttributeType type, byte[] data) : JAttribute
   }
 }
 
-public class CustomJAttribute(byte[] data) : JAttribute
+public class CustomAnnotation(byte[] data) : JVMAttribute
 {
   public byte[] Data => data;
 

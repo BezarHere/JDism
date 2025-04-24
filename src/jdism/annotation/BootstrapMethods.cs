@@ -1,4 +1,4 @@
-namespace JDism.Attributes;
+namespace JDism.attribute;
 
 
 readonly record struct BootstrapMethodRef(string Name, ushort Index);
@@ -10,9 +10,9 @@ readonly record struct BootstrapMethod(BootstrapMethodRef Reference, Constant[] 
   }
 }
 
-[Register(JAttributeType.BootstrapMethods)]
-class BootstrapMethodsJAttribute(IEnumerable<BootstrapMethod> methods)
-  : JAttribute
+[Register(AnnotationType.BootstrapMethods)]
+class BootstrapMethodsAnnotation(IEnumerable<BootstrapMethod> methods)
+  : JVMAttribute
 {
   public BootstrapMethod[] Methods = [.. methods];
 

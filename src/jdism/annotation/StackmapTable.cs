@@ -1,6 +1,6 @@
 using Util;
 
-namespace JDism.Attributes;
+namespace JDism.attribute;
 
 record VerificationTypeRecord(byte Tag, ushort Value)
 {
@@ -103,8 +103,8 @@ readonly struct StackMapFrame(byte tag, ushort offset_delta,
 
 }
 
-[Register(JAttributeType.StackMapTable)]
-class StackMapTableJAttribute(IEnumerable<StackMapFrame> frames) : JAttribute
+[Register(AnnotationType.StackMapTable)]
+class StackMapTableAnnotation(IEnumerable<StackMapFrame> frames) : JVMAttribute
 {
   public StackMapFrame[] Frames = [.. frames];
 }

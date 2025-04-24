@@ -13,7 +13,7 @@ readonly struct InstructionParameter(int value, byte size)
     Basic, // just the value integer
     Constant, // value is an index to a constant
     Local, // value is an index to a local
-    JumpIndex,
+    JumpOffset,
     FieldRef, // value is an index to a field ref in the constants
     MethodRef, // value is an index to a method ref in the constants
   }
@@ -198,22 +198,22 @@ readonly struct InstructionParameter(int value, byte size)
     {JVMOpCode.Dcmpl,       []},
     {JVMOpCode.Dcmpg,       []},
 
-    {JVMOpCode.Ifeq,        [(2, PreviewType.JumpIndex)]},
-    {JVMOpCode.Ifne,        [(2, PreviewType.JumpIndex)]},
-    {JVMOpCode.Iflt,        [(2, PreviewType.JumpIndex)]},
-    {JVMOpCode.Ifge,        [(2, PreviewType.JumpIndex)]},
-    {JVMOpCode.Ifgt,        [(2, PreviewType.JumpIndex)]},
-    {JVMOpCode.Ifle,        [(2, PreviewType.JumpIndex)]},
-    {JVMOpCode.IfIcmpeq,    [(2, PreviewType.JumpIndex)]},
-    {JVMOpCode.IfIcmpne,    [(2, PreviewType.JumpIndex)]},
-    {JVMOpCode.IfIcmplt,    [(2, PreviewType.JumpIndex)]},
-    {JVMOpCode.IfIcmpge,    [(2, PreviewType.JumpIndex)]},
-    {JVMOpCode.IfIcmpgt,    [(2, PreviewType.JumpIndex)]},
-    {JVMOpCode.IfIcmple,    [(2, PreviewType.JumpIndex)]},
-    {JVMOpCode.IfAcmpeq,    [(2, PreviewType.JumpIndex)]},
-    {JVMOpCode.IfAcmpne,    [(2, PreviewType.JumpIndex)]},
-    {JVMOpCode.Goto,        [(2, PreviewType.JumpIndex)]},
-    {JVMOpCode.Jsr,         [(2, PreviewType.JumpIndex)]},
+    {JVMOpCode.Ifeq,        [(2, PreviewType.JumpOffset)]},
+    {JVMOpCode.Ifne,        [(2, PreviewType.JumpOffset)]},
+    {JVMOpCode.Iflt,        [(2, PreviewType.JumpOffset)]},
+    {JVMOpCode.Ifge,        [(2, PreviewType.JumpOffset)]},
+    {JVMOpCode.Ifgt,        [(2, PreviewType.JumpOffset)]},
+    {JVMOpCode.Ifle,        [(2, PreviewType.JumpOffset)]},
+    {JVMOpCode.IfIcmpeq,    [(2, PreviewType.JumpOffset)]},
+    {JVMOpCode.IfIcmpne,    [(2, PreviewType.JumpOffset)]},
+    {JVMOpCode.IfIcmplt,    [(2, PreviewType.JumpOffset)]},
+    {JVMOpCode.IfIcmpge,    [(2, PreviewType.JumpOffset)]},
+    {JVMOpCode.IfIcmpgt,    [(2, PreviewType.JumpOffset)]},
+    {JVMOpCode.IfIcmple,    [(2, PreviewType.JumpOffset)]},
+    {JVMOpCode.IfAcmpeq,    [(2, PreviewType.JumpOffset)]},
+    {JVMOpCode.IfAcmpne,    [(2, PreviewType.JumpOffset)]},
+    {JVMOpCode.Goto,        [(2, PreviewType.JumpOffset)]},
+    {JVMOpCode.Jsr,         [(2, PreviewType.JumpOffset)]},
     {JVMOpCode.Ret,         [(1, PreviewType.Local)]},
 
     {JVMOpCode.Tableswitch,   null},
@@ -254,14 +254,14 @@ readonly struct InstructionParameter(int value, byte size)
 
     {JVMOpCode.Multianewarray,  [(2, PreviewType.Constant), 1]},
 
-    {JVMOpCode.Ifnull,          [(2, PreviewType.JumpIndex)]},
-    {JVMOpCode.Ifnonnull,       [(2, PreviewType.JumpIndex)]},
+    {JVMOpCode.Ifnull,          [(2, PreviewType.JumpOffset)]},
+    {JVMOpCode.Ifnonnull,       [(2, PreviewType.JumpOffset)]},
 
-    {JVMOpCode.GotoW,           [(4, PreviewType.JumpIndex)]},
-    {JVMOpCode.JsrW,            [(4, PreviewType.JumpIndex)]},
+    {JVMOpCode.GotoW,           [(4, PreviewType.JumpOffset)]},
+    {JVMOpCode.JsrW,            [(4, PreviewType.JumpOffset)]},
   };
 
-  public string ToString(PreviewType type, JContextView context = default)
+  public string ToString(PreviewType type, int address = 0, JContextView context = default)
   {
     if (type == PreviewType.Hidden)
     {
@@ -281,8 +281,8 @@ readonly struct InstructionParameter(int value, byte size)
         {
           return ToString(PreviewType.Basic);
         }
-      case PreviewType.JumpIndex:
-        return Value.ToString(Instruction.AddressFormat);
+      case PreviewType.JumpOffset:
+        return (Value + address).ToString(Instruction.AddressFormat);
       case PreviewType.Local:
         return $"Locals[{Value}]";
       default:
@@ -298,14 +298,12 @@ readonly struct InstructionParameter(int value, byte size)
     int padding = alignment == 0 ? 0 : (alignment - (source.Position % alignment)) % alignment;
     source.Seek(padding, SeekOrigin.Current);
 
-    InstructionParameter[] padding_parameter = [new(0, (byte)padding)];
-
     if (size_map is null)
     {
-      return  padding_parameter.Concat(ParseDynamic(op_code, source));
+      return  ParseDynamic(op_code, source);
     }
 
-    return padding_parameter.Concat(ParseSimple(size_map, source));
+    return ParseSimple(size_map, source);
   }
 
   public static InstructionParameter ParseOne(ByteSource source, byte size)

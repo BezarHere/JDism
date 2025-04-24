@@ -50,7 +50,7 @@ public enum ClassAccessFlags
 	Abstract = 0x0400,
 
 	Synthetic = 0x1000,
-	Annotation = 0x2000,
+	JVMAttribute = 0x2000,
 	Enum = 0x4000,
 }
 

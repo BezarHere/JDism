@@ -7,7 +7,7 @@ class Member<AccessFlagsT> where AccessFlagsT : Enum
   public string Name = "";
   public ushort DescriptorIndex;
   public JType InnerType = new();
-  public JAttribute[] Attributes = [];
+  public JVMAttribute[] Attributes = [];
 
   protected virtual string BuildSource(SourceBuilder builder) {
     throw new NotImplementedException();

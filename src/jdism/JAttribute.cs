@@ -3,7 +3,7 @@ using System.Reflection;
 
 namespace JDism;
 
-public enum JAttributeType : ushort
+public enum AnnotationType : ushort
 {
   None = 0,
   ConstantValue,
@@ -33,28 +33,28 @@ public enum JAttributeType : ushort
   UserDefined = 0xffff,
 }
 
-public abstract class JAttribute
+public abstract class JVMAttribute
 {
   [AttributeUsage(AttributeTargets.Class)]
-  internal class RegisterAttribute(JAttributeType type, string name = null) : Attribute
+  internal class RegisterAttribute(AnnotationType type, string name = null) : Attribute
   {
-    public readonly JAttributeType Type = type;
+    public readonly AnnotationType Type = type;
     public readonly string Name = string.IsNullOrEmpty(name) ? type.ToString() : name;
   }
 
 
-  public record JAttributeTypeInfo(Type InstanceType, JAttributeType AttributeType, string Name)
+  public record AnnotationTypeInfo(Type InstanceType, AnnotationType AttributeType, string Name)
   {
-    public JAttributeTypeInfo(Type Type, JAttributeType AttributeType)
+    public AnnotationTypeInfo(Type Type, AnnotationType AttributeType)
       : this(Type, AttributeType, AttributeType.ToString())
     {
     }
   }
 
-  public JAttributeTypeInfo GetTypeInfo() => FetchAttributeTypeInfo(GetType());
+  public AnnotationTypeInfo GetTypeInfo() => FetchAttributeTypeInfo(GetType());
 
 
-  public static JAttributeTypeInfo FetchAttributeTypeInfo(string name)
+  public static AnnotationTypeInfo FetchAttributeTypeInfo(string name)
   {
     return sCachedAttributeTypeInfos.FirstOrDefault(
       attr_info => attr_info.Name == name,
@@ -62,7 +62,7 @@ public abstract class JAttribute
     );
   }
 
-  public static JAttributeTypeInfo FetchAttributeTypeInfo(JAttributeType type)
+  public static AnnotationTypeInfo FetchAttributeTypeInfo(AnnotationType type)
   {
     return sCachedAttributeTypeInfos.FirstOrDefault(
       attr_info => attr_info.AttributeType == type,
@@ -70,9 +70,9 @@ public abstract class JAttribute
     );
   }
 
-  public static JAttributeTypeInfo FetchAttributeTypeInfo(Type type)
+  public static AnnotationTypeInfo FetchAttributeTypeInfo(Type type)
   {
-    Debug.Assert(type.IsAssignableTo(typeof(JAttribute)));
+    Debug.Assert(type.IsAssignableTo(typeof(JVMAttribute)));
 
     return sCachedAttributeTypeInfos.FirstOrDefault(
       attr_info => attr_info.InstanceType == type,
@@ -80,7 +80,7 @@ public abstract class JAttribute
     );
   }
 
-  public static JAttributeTypeInfo FetchAttributeTypeInfo<T>() where T : JAttribute
+  public static AnnotationTypeInfo FetchAttributeTypeInfo<T>() where T : JVMAttribute
   {
     return sCachedAttributeTypeInfos.FirstOrDefault(
       attr_info => attr_info.InstanceType == typeof(T),
@@ -88,39 +88,39 @@ public abstract class JAttribute
     );
   }
 
-  private static IEnumerable<JAttributeTypeInfo> ScanForAttributeTypeInfos()
+  private static IEnumerable<AnnotationTypeInfo> ScanForAttributeTypeInfos()
   {
     var assembly = Assembly.GetExecutingAssembly();
     Console.WriteLine($"assembly={assembly}");
     var registered_classes =
       from t in assembly.DefinedTypes
-      where t.IsClass && t.BaseType == typeof(JAttribute)
+      where t.IsClass && t.BaseType == typeof(JVMAttribute)
       where t.CustomAttributes.Any(a => a.AttributeType == typeof(RegisterAttribute))
       select (t.AsType(), t.GetCustomAttribute<RegisterAttribute>());
     registered_classes = registered_classes.DistinctBy(tpl => tpl.Item2.Type);
 
     foreach ((Type type, RegisterAttribute attr) in registered_classes)
     {
-      Debug.Assert(attr.Type != JAttributeType._Max);
+      Debug.Assert(attr.Type != AnnotationType._Max);
       Console.WriteLine(
         $"[*] Found J-attribute: class {type.FullName}, type={attr.Type}, name='{attr.Name}'"
       );
       yield return new(type, attr.Type, attr.Name);
     }
 
-    for (int i = 0; i < (int)JAttributeType._Max; i++)
+    for (int i = 0; i < (int)AnnotationType._Max; i++)
     {
-      JAttributeType type = (JAttributeType)i;
-      yield return new(typeof(UnknownJAttribute), type);
+      AnnotationType type = (AnnotationType)i;
+      yield return new(typeof(UnknownAnnotation), type);
     }
   }
 
 
-  private static readonly JAttributeTypeInfo[] sCachedAttributeTypeInfos = [
+  private static readonly AnnotationTypeInfo[] sCachedAttributeTypeInfos = [
     .. ScanForAttributeTypeInfos()
   ];
-  private static readonly JAttributeTypeInfo CustomAttributeType =
-    new(typeof(CustomJAttribute), JAttributeType.UserDefined);
+  private static readonly AnnotationTypeInfo CustomAttributeType =
+    new(typeof(CustomAnnotation), AnnotationType.UserDefined);
 }
 
 

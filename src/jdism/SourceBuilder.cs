@@ -4,11 +4,11 @@ using System.Text;
 
 namespace JDism;
 
-ref struct SourceBuilder(IEnumerable<JAttribute> attributes, string name, JType? type, JContextView context = default)
+ref struct SourceBuilder(IEnumerable<JVMAttribute> attributes, string name, JType? type, JContextView context = default)
 {
   private const string Indent = "  ";
 
-  public readonly IEnumerable<JAttribute> Attributes => attributes;
+  public readonly IEnumerable<JVMAttribute> Attributes => attributes;
   public readonly string Name => name;
   public readonly JType? Type => type;
   public readonly JContextView Context = context;
@@ -19,14 +19,14 @@ ref struct SourceBuilder(IEnumerable<JAttribute> attributes, string name, JType?
     ReadOnlySpan<Instruction> instructions = null;
     JType? _type = Type;
 
-    foreach (JAttribute attribute in Attributes)
+    foreach (JVMAttribute attribute in Attributes)
     {
-      if (attribute is SignatureJAttribute signature_attr)
+      if (attribute is SignatureAnnotation signature_attr)
       {
         _type = signature_attr.Signature;
         continue;
       }
-      if (attribute is CodeInfoJAttribute code_attr)
+      if (attribute is CodeInfoAnnotation code_attr)
       {
         instructions = code_attr.Instructions;
         continue;
@@ -69,15 +69,15 @@ ref struct SourceBuilder(IEnumerable<JAttribute> attributes, string name, JType?
 
     Constant default_value = null;
 
-    foreach (JAttribute attribute in attributes)
+    foreach (JVMAttribute attribute in attributes)
     {
-      if (attribute is SignatureJAttribute signature_attr)
+      if (attribute is SignatureAnnotation signature_attr)
       {
         _type = signature_attr.Signature;
         continue;
       }
 
-      if (attribute is ConstantInfoJAttribute constant_attr)
+      if (attribute is ConstantInfoAnnotation constant_attr)
       {
         default_value = constant_attr.Constant;
         continue;

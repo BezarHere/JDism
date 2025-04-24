@@ -80,7 +80,7 @@ static class JDisassembler
 		for (uint i = 0; i < disassembly.Context.Fields.Length; i++)
 		{
 			disassembly.Context.Fields[i] = reader.ReadField();
-      disassembly.Context.Fields[i].Attributes = new JAttribute[reader.ReadU16BE()];
+      disassembly.Context.Fields[i].Attributes = new JVMAttribute[reader.ReadU16BE()];
       for (int j = 0; j < disassembly.Context.Fields[i].Attributes.Length; j++)
       {
         disassembly.Context.Fields[i].Attributes[j] = disassembly.ReadAttribute(reader);
@@ -93,7 +93,7 @@ static class JDisassembler
 		for (uint i = 0; i < disassembly.Context.Methods.Length; i++)
 		{
 			disassembly.Context.Methods[i] = reader.ReadMethod();
-      disassembly.Context.Methods[i].Attributes = new JAttribute[reader.ReadU16BE()];
+      disassembly.Context.Methods[i].Attributes = new JVMAttribute[reader.ReadU16BE()];
       for (int j = 0; j < disassembly.Context.Methods[i].Attributes.Length; j++)
       {
         disassembly.Context.Methods[i].Attributes[j] = disassembly.ReadAttribute(reader);
@@ -102,7 +102,7 @@ static class JDisassembler
 
 
 
-		disassembly.Attributes = new JAttribute[reader.ReadU16BE()];
+		disassembly.Attributes = new JVMAttribute[reader.ReadU16BE()];
 
 		for (uint i = 0; i < disassembly.Attributes.Length; i++)
 		{

@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.Text;
-using JDism.Attributes;
+using JDism.attribute;
 
 namespace JDism;
 
@@ -11,7 +11,7 @@ class Disassembly : InnerLogger
   public ushort SuperClass;
   public ushort[] Interfaces = [];
 
-  public JAttribute[] Attributes = [];
+  public JVMAttribute[] Attributes = [];
 
   public JContext Context;
 
@@ -30,7 +30,7 @@ class Disassembly : InnerLogger
     string class_name = Context.Constants[ThisClass - 1].String;
     string super_name = Context.Constants[SuperClass - 1].String;
 
-    foreach (JAttribute attr in Attributes)
+    foreach (JVMAttribute attr in Attributes)
     {
       builder.Append(attr).Append('\n');
     }
@@ -170,33 +170,33 @@ class Disassembly : InnerLogger
     return (name_index, data_len);
   }
 
-  public JAttribute ReadAttribute(JReader reader,
+  public JVMAttribute ReadAttribute(JReader reader,
               JTypeParseContext context = JTypeParseContext.Basic)
   {
     (int name_index, int data_len) = ReadAttributeHeader(reader.ReadBuffer(6));
     return LoadAttribute(name_index, reader.ReadBuffer(data_len), context);
   }
 
-  public JAttribute ParseAttribute(ByteSource source)
+  public JVMAttribute ParseAttribute(ByteSource source)
   {
     (int name_index, int data_len) = ReadAttributeHeader(source.Get(6).ToArray());
 
     return LoadAttribute(name_index, [.. source.Get(data_len)]);
   }
 
-  private JAttribute LoadAttribute(int name_index, byte[] data,
+  private JVMAttribute LoadAttribute(int name_index, byte[] data,
               JTypeParseContext context = JTypeParseContext.Basic)
   {
     Debug.Assert(name_index > 0 && name_index < Context.Constants.Length);
 
     string name = Context.Constants[name_index].String;
-    var attr_info = JAttribute.FetchAttributeTypeInfo(name);
+    var attr_info = JVMAttribute.FetchAttributeTypeInfo(name);
 
     return LoadAttribute(attr_info, new(data, Endianness.Big), context);
   }
 
 
-  public JAttribute LoadAttribute(JAttribute.JAttributeTypeInfo info, ByteSource source,
+  public JVMAttribute LoadAttribute(JVMAttribute.AnnotationTypeInfo info, ByteSource source,
               JTypeParseContext context = JTypeParseContext.Basic)
   {
     if (info is null)
@@ -204,27 +204,27 @@ class Disassembly : InnerLogger
       return null;
     }
 
-    if (info.AttributeType == JAttributeType.ConstantValue)
+    if (info.AttributeType == AnnotationType.ConstantValue)
     {
       int const_index = source.GetUShort();
-      return new ConstantInfoJAttribute(Context.Constants[const_index - 1], (ushort)const_index);
+      return new ConstantInfoAnnotation(Context.Constants[const_index - 1], (ushort)const_index);
     }
 
-    if (info.AttributeType == JAttributeType.Signature)
+    if (info.AttributeType == AnnotationType.Signature)
     {
       int const_index = source.GetUShort();
-      return new SignatureJAttribute(
+      return new SignatureAnnotation(
         new JType(Context.Constants[const_index - 1].String, context),
         (ushort)const_index
       );
     }
 
-    if (info.AttributeType == JAttributeType.Code)
+    if (info.AttributeType == AnnotationType.Code)
     {
       return LoadCodeAttribute(source);
     }
 
-    if (info.AttributeType == JAttributeType.StackMapTable)
+    if (info.AttributeType == AnnotationType.StackMapTable)
     {
       ushort frames_count = source.GetUShort();
       StackMapFrame[] frames = new StackMapFrame[frames_count];
@@ -236,13 +236,13 @@ class Disassembly : InnerLogger
 
       Debug.Assert(source.Depleted);
 
-      return new StackMapTableJAttribute(frames);
+      return new StackMapTableAnnotation(frames);
     }
 
-    if (info.AttributeType == JAttributeType.Exceptions)
+    if (info.AttributeType == AnnotationType.Exceptions)
     {
       ushort exceptions_count = source.GetUShort();
-      var exceptions = new ExceptionJAttribute.ExceptionNameInfo[exceptions_count];
+      var exceptions = new ExceptionAnnotation.ExceptionNameInfo[exceptions_count];
       for (int i = 0; i < exceptions_count; i++)
       {
         ushort index = source.GetUShort();
@@ -250,10 +250,10 @@ class Disassembly : InnerLogger
 
         exceptions[i] = new(Context.Constants[index].String, index);
       }
-      return new ExceptionJAttribute(exceptions);
+      return new ExceptionAnnotation(exceptions);
     }
 
-    if (info.AttributeType == JAttributeType.BootstrapMethods)
+    if (info.AttributeType == AnnotationType.BootstrapMethods)
     {
       ushort methods_count = source.GetUShort();
 
@@ -278,17 +278,17 @@ class Disassembly : InnerLogger
         );
       }
 
-      return new BootstrapMethodsJAttribute(methods);
+      return new BootstrapMethodsAnnotation(methods);
     }
 
-    if (info.AttributeType == JAttributeType.UserDefined)
+    if (info.AttributeType == AnnotationType.UserDefined)
     {
-      return new CustomJAttribute(source.Content.ToArray());
+      return new CustomAnnotation(source.Content.ToArray());
     }
 
-    if (info.InstanceType == typeof(UnknownJAttribute))
+    if (info.InstanceType == typeof(UnknownAnnotation))
     {
-      return new UnknownJAttribute(info.AttributeType, source.Content.ToArray());
+      return new UnknownAnnotation(info.AttributeType, source.Content.ToArray());
     }
 
     return null;
@@ -309,7 +309,7 @@ class Disassembly : InnerLogger
   }
 
 
-  private CodeInfoJAttribute LoadCodeAttribute(ByteSource data)
+  private CodeInfoAnnotation LoadCodeAttribute(ByteSource data)
   {
     ushort max_stack = data.GetUShort();
     ushort max_locals = data.GetUShort();
@@ -324,14 +324,14 @@ class Disassembly : InnerLogger
     ];
 
     ushort attr_count = data.GetUShort();
-    JAttribute[] attributes = new JAttribute[attr_count];
+    JVMAttribute[] attributes = new JVMAttribute[attr_count];
 
     for (int i = 0; i < attr_count; i++)
     {
       attributes[i] = ParseAttribute(data);
     }
 
-    return new CodeInfoJAttribute(
+    return new CodeInfoAnnotation(
       max_stack, max_locals,
       [.. Instruction.ReadAll(code)],
       exceptions,
