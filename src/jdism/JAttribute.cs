@@ -3,7 +3,7 @@ using System.Reflection;
 
 namespace JDism;
 
-public enum AnnotationType : ushort
+public enum JVMAttributeType : ushort
 {
   None = 0,
   ConstantValue,
@@ -36,25 +36,25 @@ public enum AnnotationType : ushort
 public abstract class JVMAttribute
 {
   [AttributeUsage(AttributeTargets.Class)]
-  internal class RegisterAttribute(AnnotationType type, string name = null) : Attribute
+  internal class RegisterAttribute(JVMAttributeType type, string name = null) : Attribute
   {
-    public readonly AnnotationType Type = type;
+    public readonly JVMAttributeType Type = type;
     public readonly string Name = string.IsNullOrEmpty(name) ? type.ToString() : name;
   }
 
 
-  public record AnnotationTypeInfo(Type InstanceType, AnnotationType AttributeType, string Name)
+  public record JVMAttributeTypeInfo(Type InstanceType, JVMAttributeType AttributeType, string Name)
   {
-    public AnnotationTypeInfo(Type Type, AnnotationType AttributeType)
+    public JVMAttributeTypeInfo(Type Type, JVMAttributeType AttributeType)
       : this(Type, AttributeType, AttributeType.ToString())
     {
     }
   }
 
-  public AnnotationTypeInfo GetTypeInfo() => FetchAttributeTypeInfo(GetType());
+  public JVMAttributeTypeInfo GetTypeInfo() => FetchAttributeTypeInfo(GetType());
 
 
-  public static AnnotationTypeInfo FetchAttributeTypeInfo(string name)
+  public static JVMAttributeTypeInfo FetchAttributeTypeInfo(string name)
   {
     return sCachedAttributeTypeInfos.FirstOrDefault(
       attr_info => attr_info.Name == name,
@@ -62,7 +62,7 @@ public abstract class JVMAttribute
     );
   }
 
-  public static AnnotationTypeInfo FetchAttributeTypeInfo(AnnotationType type)
+  public static JVMAttributeTypeInfo FetchAttributeTypeInfo(JVMAttributeType type)
   {
     return sCachedAttributeTypeInfos.FirstOrDefault(
       attr_info => attr_info.AttributeType == type,
@@ -70,7 +70,7 @@ public abstract class JVMAttribute
     );
   }
 
-  public static AnnotationTypeInfo FetchAttributeTypeInfo(Type type)
+  public static JVMAttributeTypeInfo FetchAttributeTypeInfo(Type type)
   {
     Debug.Assert(type.IsAssignableTo(typeof(JVMAttribute)));
 
@@ -80,7 +80,7 @@ public abstract class JVMAttribute
     );
   }
 
-  public static AnnotationTypeInfo FetchAttributeTypeInfo<T>() where T : JVMAttribute
+  public static JVMAttributeTypeInfo FetchAttributeTypeInfo<T>() where T : JVMAttribute
   {
     return sCachedAttributeTypeInfos.FirstOrDefault(
       attr_info => attr_info.InstanceType == typeof(T),
@@ -88,7 +88,7 @@ public abstract class JVMAttribute
     );
   }
 
-  private static IEnumerable<AnnotationTypeInfo> ScanForAttributeTypeInfos()
+  private static IEnumerable<JVMAttributeTypeInfo> ScanForAttributeTypeInfos()
   {
     var assembly = Assembly.GetExecutingAssembly();
     Console.WriteLine($"assembly={assembly}");
@@ -101,26 +101,26 @@ public abstract class JVMAttribute
 
     foreach ((Type type, RegisterAttribute attr) in registered_classes)
     {
-      Debug.Assert(attr.Type != AnnotationType._Max);
+      Debug.Assert(attr.Type != JVMAttributeType._Max);
       Console.WriteLine(
         $"[*] Found J-attribute: class {type.FullName}, type={attr.Type}, name='{attr.Name}'"
       );
       yield return new(type, attr.Type, attr.Name);
     }
 
-    for (int i = 0; i < (int)AnnotationType._Max; i++)
+    for (int i = 0; i < (int)JVMAttributeType._Max; i++)
     {
-      AnnotationType type = (AnnotationType)i;
+      JVMAttributeType type = (JVMAttributeType)i;
       yield return new(typeof(UnknownAnnotation), type);
     }
   }
 
 
-  private static readonly AnnotationTypeInfo[] sCachedAttributeTypeInfos = [
+  private static readonly JVMAttributeTypeInfo[] sCachedAttributeTypeInfos = [
     .. ScanForAttributeTypeInfos()
   ];
-  private static readonly AnnotationTypeInfo CustomAttributeType =
-    new(typeof(CustomAnnotation), AnnotationType.UserDefined);
+  private static readonly JVMAttributeTypeInfo CustomAttributeType =
+    new(typeof(CustomAnnotation), JVMAttributeType.UserDefined);
 }
 
 

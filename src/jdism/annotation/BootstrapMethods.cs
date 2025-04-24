@@ -10,7 +10,7 @@ readonly record struct BootstrapMethod(BootstrapMethodRef Reference, Constant[] 
   }
 }
 
-[Register(AnnotationType.BootstrapMethods)]
+[Register(JVMAttributeType.BootstrapMethods)]
 class BootstrapMethodsAnnotation(IEnumerable<BootstrapMethod> methods)
   : JVMAttribute
 {

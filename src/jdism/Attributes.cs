@@ -3,7 +3,7 @@ using Util;
 namespace JDism;
 
 
-[Register(AnnotationType.ConstantValue)]
+[Register(JVMAttributeType.ConstantValue)]
 public class ConstantInfoAnnotation(Constant constant, ushort index) : JVMAttribute
 {
   public readonly Constant Constant = constant;
@@ -16,7 +16,7 @@ public class ConstantInfoAnnotation(Constant constant, ushort index) : JVMAttrib
   }
 }
 
-[Register(AnnotationType.Signature)]
+[Register(JVMAttributeType.Signature)]
 public class SignatureAnnotation(JType type, ushort index) : JVMAttribute
 {
   public JType Signature = type;
@@ -30,7 +30,7 @@ public class SignatureAnnotation(JType type, ushort index) : JVMAttribute
 
 public record ExceptionRecord(ushort StartPc, ushort EndPc, ushort HandlerPc, ushort CatchType);
 
-[Register(AnnotationType.Code)]
+[Register(JVMAttributeType.Code)]
 class CodeInfoAnnotation : JVMAttribute
 {
 
@@ -63,7 +63,7 @@ class CodeInfoAnnotation : JVMAttribute
 
 
 
-[Register(AnnotationType.Exceptions)]
+[Register(JVMAttributeType.Exceptions)]
 public class ExceptionAnnotation(IEnumerable<ExceptionAnnotation.ExceptionNameInfo> infos)
   : JVMAttribute
 {
@@ -76,9 +76,9 @@ public class ExceptionAnnotation(IEnumerable<ExceptionAnnotation.ExceptionNameIn
   }
 }
 
-public class UnknownAnnotation(AnnotationType type, byte[] data) : JVMAttribute
+public class UnknownAnnotation(JVMAttributeType type, byte[] data) : JVMAttribute
 {
-  public AnnotationType Type => type;
+  public JVMAttributeType Type => type;
   public byte[] Data => data;
 
   public override string ToString()

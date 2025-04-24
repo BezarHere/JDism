@@ -103,7 +103,7 @@ readonly struct StackMapFrame(byte tag, ushort offset_delta,
 
 }
 
-[Register(AnnotationType.StackMapTable)]
+[Register(JVMAttributeType.StackMapTable)]
 class StackMapTableAnnotation(IEnumerable<StackMapFrame> frames) : JVMAttribute
 {
   public StackMapFrame[] Frames = [.. frames];

@@ -34,7 +34,7 @@ struct AnnotationElementValue
 record Annotation(ushort NameIndex, string Name, AnnotationElementValue[] Elements);
 
 
-[Register(AnnotationType.RuntimeVisibleAnnotations)]
+[Register(JVMAttributeType.RuntimeVisibleAnnotations)]
 class RuntimeVisibleAnnotation : JVMAttribute
 {
 

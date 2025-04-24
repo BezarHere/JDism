@@ -196,7 +196,7 @@ class Disassembly : InnerLogger
   }
 
 
-  public JVMAttribute LoadAttribute(JVMAttribute.AnnotationTypeInfo info, ByteSource source,
+  public JVMAttribute LoadAttribute(JVMAttribute.JVMAttributeTypeInfo info, ByteSource source,
               JTypeParseContext context = JTypeParseContext.Basic)
   {
     if (info is null)
@@ -204,13 +204,13 @@ class Disassembly : InnerLogger
       return null;
     }
 
-    if (info.AttributeType == AnnotationType.ConstantValue)
+    if (info.AttributeType == JVMAttributeType.ConstantValue)
     {
       int const_index = source.GetUShort();
       return new ConstantInfoAnnotation(Context.Constants[const_index - 1], (ushort)const_index);
     }
 
-    if (info.AttributeType == AnnotationType.Signature)
+    if (info.AttributeType == JVMAttributeType.Signature)
     {
       int const_index = source.GetUShort();
       return new SignatureAnnotation(
@@ -219,12 +219,12 @@ class Disassembly : InnerLogger
       );
     }
 
-    if (info.AttributeType == AnnotationType.Code)
+    if (info.AttributeType == JVMAttributeType.Code)
     {
       return LoadCodeAttribute(source);
     }
 
-    if (info.AttributeType == AnnotationType.StackMapTable)
+    if (info.AttributeType == JVMAttributeType.StackMapTable)
     {
       ushort frames_count = source.GetUShort();
       StackMapFrame[] frames = new StackMapFrame[frames_count];
@@ -239,7 +239,7 @@ class Disassembly : InnerLogger
       return new StackMapTableAnnotation(frames);
     }
 
-    if (info.AttributeType == AnnotationType.Exceptions)
+    if (info.AttributeType == JVMAttributeType.Exceptions)
     {
       ushort exceptions_count = source.GetUShort();
       var exceptions = new ExceptionAnnotation.ExceptionNameInfo[exceptions_count];
@@ -253,7 +253,7 @@ class Disassembly : InnerLogger
       return new ExceptionAnnotation(exceptions);
     }
 
-    if (info.AttributeType == AnnotationType.BootstrapMethods)
+    if (info.AttributeType == JVMAttributeType.BootstrapMethods)
     {
       ushort methods_count = source.GetUShort();
 
@@ -281,7 +281,7 @@ class Disassembly : InnerLogger
       return new BootstrapMethodsAnnotation(methods);
     }
 
-    if (info.AttributeType == AnnotationType.UserDefined)
+    if (info.AttributeType == JVMAttributeType.UserDefined)
     {
       return new CustomAnnotation(source.Content.ToArray());
     }
