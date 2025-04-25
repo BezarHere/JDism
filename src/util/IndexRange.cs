@@ -18,6 +18,11 @@ public readonly struct IndexRange(int start, int end)
     return $"({start}:{end})";
   }
 
+  public readonly IndexRange Abs()
+  {
+    return Start > End ? new(End, Start) : this;
+  }
+
   public readonly IndexRange Merge(in IndexRange other)
   {
     return new(Math.Min(Start, other.Start), Math.Max(End, other.End));

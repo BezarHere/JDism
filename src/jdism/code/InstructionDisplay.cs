@@ -100,7 +100,18 @@ ref struct InstructionDisplay
     return builder.ToString();
   }
 
-  private readonly record struct Jump(int Start, int Target);
+  private readonly record struct Jump(IndexRange Range)
+  {
+    public readonly int Start => Range.Start;
+    public readonly int Target => Range.End;
+    public readonly IndexRange AbsRange = Range.Abs();
+
+    public Jump(int source, int target)
+      : this(new IndexRange(source, target))
+    {
+    }
+  }
+
   private record JumpLevel(IndexRange Range, Jump[] Jumps);
 
   private static Dictionary<int, List<int>> GetJumpTable(
@@ -158,68 +169,43 @@ ref struct InstructionDisplay
 
   private static List<List<Jump>> GenJumpStack(Dictionary<int, List<int>> table)
   {
+    var all_jumps = 
+      from kv in table
+      let target_index = kv.Key
+      let sources = kv.Value
+      from source_index in sources
+      orderby Math.Abs(source_index - target_index)
+      select new Jump(source_index, target_index);
+
     List<List<Jump>> stacks = [];
-    List<IndexRange> ranges = [];
 
-    foreach ((int target_index, List<int> sources) in table)
+    foreach (Jump j in all_jumps)
     {
-      List<Jump> jumps = [];
-      int reach_start = target_index;
-      int reach_end = target_index;
-
-      foreach (int source in sources)
-      {
-        jumps.Add(
-          new(source, target_index)
-        );
-
-        if (source < reach_start)
-        {
-          reach_start = source;
-        }
-
-        if (source > reach_end)
-        {
-          reach_end = source;
-        }
-      }
-
-      IndexRange reach_range = new(reach_start, reach_end);
-
-      int target_stack = -1;
-
-      for (int i = 0; i < stacks.Count; i++)
-      {
-        foreach (Jump jump_lvl in stacks[i])
-        {
-          IndexRange jmp_range = new(jump_lvl.Start, jump_lvl.Target);
-          if (jmp_range.Touches(reach_range))
-          {
-            continue;
-          }
-
-          target_stack = i;
-          break;
-        }
-
-        if (target_index != -1)
-        {
-          break;
-        }
-      }
-
-      if (target_stack == -1)
-      {
-        stacks.Add(jumps);
-        ranges.Add(reach_range);
-        continue;
-      }
-
-      stacks[target_stack].AddRange(jumps);
-      ranges[target_stack] = ranges[target_stack].Merge(reach_range);
+      GenJumpStack_AddToStack(stacks, j);
     }
 
     return stacks;
+  }
+
+  private static int GenJumpStack_AddToStack(List<List<Jump>> stacks, Jump jump)
+  {
+    for (int i = 0; i < stacks.Count; i++)
+    {
+      var intersections = stacks[i].Any(
+        j => j.Target != jump.Target && j.AbsRange.Touches(jump.AbsRange)
+      );
+
+      if (intersections)
+      {
+        continue;
+      }
+
+      stacks[i].Add(jump);
+      return i;
+    }
+
+    stacks.Add([jump]);
+    return stacks.Count - 1;
   }
 
   private enum Orientation : byte
